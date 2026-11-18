@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<!--
+  Gitarren-Tool (Stimmgerät & Metronom) - v1.0 (18.11.2026)
+  - Erste Version: Stimmgerät (Saiten- & Freier-Modus, Referenzton,
+    einstellbarer Kammerton) und Metronom (BPM, Tap-Tempo, variable
+    Taktarten, Spuren/Sequenzen-Editor, lokale Speicherung).
+  - Design und Aufbau orientiert sich an what_to_do-v1.6.html
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Gitarren-Tool – Stimmgerät &amp; Metronom</title>
+<style>
+  /* ===== Grundfarben & Themes ===== */
+  :root{
+    --bg:#f6eee7;
+    --panel:#fffaf5;
+    --surface:#f1e5db;
+    --ink:#342a27;
+    --muted:#8a7a72;
+    --line:#e0d2c6;
+    --red:#bd6553;
+    --gold:#cfa75f;
+    --green:#5e8a5e;
+    --danger:#a63d2f;
+    --shadow:0 2px 8px rgba(52,42,39,.08);
+  }
+  html[data-theme="dark"]{
+    --bg:#241d1a;
+    --panel:#2e2622;
+    --surface:#3a2f2a;
+    --ink:#f0e6df;
+    --muted:#a5938a;
+    --line:#4a3c35;
+    --red:#d97f6b;
+    --gold:#e0bf78;
+    --green:#7fb07f;
+    --danger:#d96a58;
+    --shadow:0 2px 8px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--bg);color:var(--ink);transition:background .45s ease,color .45s ease;}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:16px;line-height:1.45;}
+
+  main{max-width:640px;margin:0 auto;padding:16px 16px 90px;}
+
+  /* ===== Header ===== */
+  header{
+    position:sticky;top:0;z-index:20;
+    background:var(--red);color:#fff;
+    padding:12px 16px;display:flex;align-items:center;gap:8px;
+    transition:background .45s ease;
+  }
+  header h1{font-size:18px;font-weight:600;cursor:pointer;flex:1;}
+
+  /* ===== Komponenten ===== */
+  .card{background:var(--panel);border-radius:14px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px;transition:background .45s ease;}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    border:none;border-radius:10px;padding:10px 16px;cursor:pointer;
+    font-size:15px;font-weight:500;background:var(--gold);color:#342a27;
+    transition:filter .2s ease,background .45s ease;
+  }
+  .btn:hover{filter:brightness(1.05);}
+  .btn.red{background:var(--red);color:#fff;}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);}
+  .btn.small{padding:6px 10px;font-size:13px;border-radius:8px;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .muted{color:var(--muted);font-size:14px;}
+  input[type="number"],select,input[type="text"]{
+    background:var(--surface);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;font-size:15px;
+  }
+  label{font-size:14px;color:var(--muted);}
+
+  dialog{
+    border:none;border-radius:14px;background:var(--panel);color:var(--ink);
+    max-width:480px;width:calc(100% - 32px);padding:0;box-shadow:0 8px 30px rgba(0,0,0,.25);
+  }
+  dialog::backdrop{background:rgba(0,0,0,.45);}
+  dialog .dlg-body{padding:16px;}
+  dialog .dlg-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);}
+
+  .warnbar{
+    background:var(--danger);color:#fff;border-radius:10px;
+    padding:10px 14px;margin-bottom:14px;font-size:14px;display:none;
+  }
+
+  /* ===== Views & Navigation ===== */
+  view-section{display:none;}
+  view-section.active{display:block;}
+
+  nav.bottom{
+    position:fixed;bottom:0;left:0;right:0;z-index:20;
+    background:var(--panel);border-top:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-around;
+    padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+    transition:background .45s ease;
+  }
+  nav.bottom .navbtn{
+    border:none;background:none;color:var(--muted);font-size:14px;
+    display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:6px 14px;border-radius:10px;
+  }
+  nav.bottom .navbtn.active{color:var(--red);font-weight:600;}
+
+  /* ===== Stimmgerät ===== */
+  #tunerDisplay{
+    width:100%;height:150px;background:var(--surface);border-radius:14px;position:relative;overflow:hidden;
+    transition:background .45s ease;
+  }
+  #needle{position:absolute;bottom:0;left:50%;width:3px;height:60%;background:var(--red);transform-origin:bottom center;transition:transform .06s linear;}
+  #targetHz{font-size:28px;font-weight:700;text-align:center;margin-top:10px;}
+  #centOff{font-size:16px;color:var(--muted);text-align:center;}
+  .stringList{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
+  .stringBtn{
+    flex:1 1 44px;max-width:80px;padding:10px 4px;border-radius:10px;border:1px solid var(--line);
+    background:var(--surface);color:var(--ink);cursor:pointer;text-align:center;font-size:15px;font-weight:600;
+    transition:background .2s ease,color .2s ease;
+  }
+  .stringBtn.active{background:var(--red);color:#fff;border-color:var(--red);}
+  .stringBtn small{display:block;font-weight:400;font-size:11px;color:inherit;opacity:.75;}
+
+  /* ===== Metronom ===== */
+  #beatDots{display:flex;gap:8px;justify-content:center;margin:14px 0;flex-wrap:wrap;}
+  .dot{width:16px;height:16px;border-radius:50%;background:var(--surface);border:1px solid var(--line);transition:background .1s ease;}
+  .dot.on{background:var(--red);border-color:var(--red);}
+  .dot.accent{background:var(--gold);border-color:var(--gold);}
+  #bpmBig{font-size:44px;font-weight:700;text-align:center;line-height:1.1;}
+  #trackList .trackItem{
+    display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+    background:var(--surface);border-radius:10px;padding:10px;margin-bottom:8px;
+  }
+  .delBtn{margin-left:auto;}
+
+  footer.muted{margin-top:20px;text-align:center;font-size:12px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="homeBtn">🎸 Gitarren-Tool</h1>
+  <button class="btn ghost small" id="helpBtn" title="Hilfe">?</button>
+  <button class="btn ghost small" id="themeBtn" title="Farbwechsel">🌗</button>
+</header>
+
+<div class="warnbar" id="micWarn" style="display:none;max-width:640px;margin:12px auto 0;padding:0 16px;">
+  Mikrofon konnte nicht gestartet werden – Stimmgerät benötigt Zugriff.
+</div>
+
+<main>
+
+  <!-- ==================== VIEW: Stimmgerät ==================== -->
+  <view-section id="viewTuner" class="active">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <strong>Stimmgerät</strong>
+        <div class="row">
+          <label for="a4Input">Kammerton A4</label>
+          <input type="number" id="a4Input" min="430" max="450" step="0.1" value="440" style="width:80px;"> Hz
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn red" id="micBtn">🎙️ Mikrofon starten</button>
+        <div class="row" style="margin-left:auto;">
+          <label><input type="radio" name="tunerMode" value="strings" checked> Saiten</label>
+          <label><input type="radio" name="tunerMode" value="free"> Frei (ganzer Bereich)</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="tunerDisplay">
+        <div id="needle"></div>
+      </div>
+      <div id="targetHz">–</div>
+      <div id="centOff">Nadel folgt der erkannten Frequenz</div>
+
+      <div class="stringList" id="stringList"></div>
+      <div class="row" style="justify-content:center;margin-top:12px;">
+        <button class="btn small ghost" id="refToneBtn">🔊 Referenzton</button>
+      </div>
+    </div>
+  </view-section>
+
+  <!-- ==================== VIEW: Metronom ==================== -->
+  <view-section id="viewMetro">
+    <div class="card">
+      <div class="row" style="justify-content:center;flex-direction:column;">
+        <div id="bpmBig">120 <span class="muted" style="font-size:16px;">BPM</span></div>
+        <div class="row" style="justify-content:center;margin-top:8px;">
+          <label>BPM <input type="number" id="bpmInput" min="20" max="300" value="120" style="width:70px;"></label>
+          <label>Taktart
+            <select id="tsSelect">
+              <option value="4/4" selected>4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="2/4">2/4</option>
+              <option value="6/8">6/8</option>
+              <option value="7/8">7/8</option>
+              <option value="5/4">5/4</option>
+              <option value="custom">Eigen…</option>
+            </select>
+          </label>
+          <input type="number" id="tsCustomBeats" min="2" max="16" value="7" style="width:60px;display:none;" title="Zähler">
+          <input type="number" id="tsCustomDen" min="2" max="32" value="8" style="width:60px;display:none;" title="Nenner">
+        </div>
+        <div class="row" style="justify-content:center;margin-top:10px;">
+          <button class="btn red" id="startStopBtn">▶ Start</button>
+          <button class="btn ghost" id="tapBtn">👋 Tap</button>
+        </div>
+        <div id="beatDots"></div>
+        <div class="muted" id="metroStatus" style="text-align:center;">Bereit</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>Spuren / Sequenzen</strong>
+      <p class="muted" style="margin:6px 0 10px;">
+        Lege einzelne Abschnitte fest (BPM + Taktart + Takte-Anzahl). Beim Abspielen
+        laufen sie in dieser Reihenfolge ab.
+      </p>
+      <div id="trackList"></div>
+      <div class="row">
+        <button class="btn small" id="addTrackBtn">+ Abschnitt</button>
+        <button class="btn small red" id="playSeqBtn">▶ Sequenz abspielen</button>
+        <button class="btn small ghost" id="clearTracksBtn">Alle löschen</button>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn small ghost" id="exportBtn">⬇ Export</button>
+        <button class="btn small ghost" id="importBtn">⬆ Import</button>
+        <input type="file" id="importFile" accept=".json" style="display:none;">
+      </div>
+    </div>
+  </view-section>
+
+</main>
+
+<nav class="bottom">
+  <button class="navbtn active" data-view="viewTuner">🎯<span>Stimmgerät</span></button>
+  <button class="navbtn" data-view="viewMetro">🥁<span>Metronom</span></button>
+</nav>
+
+<!-- ==================== Dialog: Hilfe ==================== -->
+<dialog id="helpDlg">
+  <div class="dlg-head"><strong>Hilfe</strong><button class="btn small ghost" onclick="this.closest('dialog').close()">Schließen</button></div>
+  <div class="dlg-body">
+    <p><strong>Stimmgerät:</strong> Mikrofon starten, Saite wählen (oder „Frei"-Modus). Die rote Nadel zeigt, wie weit der Ton daneben liegt. Mit 🔊 hörst du die Referenzfrequenz der gewählten Saite.</p>
+    <p style="margin-top:8px;"><strong>Metronom:</strong> BPM eintippen oder per 👋 Tap eintakten. Taktart wählen oder eigene (Zähler/Nenner) angeben. Unten kannst du Sequenzen mit mehreren Abschnitten bauen und abspielen. Alles wird lokal gespeichert.</p>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+/* =====================================================================
+   Abschnitte im Skript:
+   1. Konstanten & Defaults
+   2. Zustand & Persistenz
+   3. UI / Navigation & Theme
+   4. Stimmgerät (Mikrofon, Pitch-Erkennung, Referenzton)
+   5. Metronom (Engine, Tap, Taktarten)
+   6. Spuren-/Sequenz-Editor
+   7. Export/Import
+   ===================================================================== */
+
+/* ===== 1. Konstanten & Defaults ===== */
+const STD_STRINGS = [
+  {note:"E2", hz:82.41},
+  {note:"A2", hz:110.00},
+  {note:"D3", hz:146.83},
+  {note:"G3", hz:196.00},
+  {note:"B3", hz:246.94},
+  {note:"E4", hz:329.63}
+];
+const FREE_MIN_HZ = 70, FREE_MAX_HZ = 450;     // relevanter Bereich für Nadel im Frei-Modus
+const STORE_KEY   = "gitToolData";
+const PITCH_BUF   = 2048;
+
+/* ===== 2. Zustand & Persistenz ===== */
+let state = {
+  a4: 440,
+  tunerMode: "strings",
+  activeString: 5,           // Index in STD_STRINGS (Standard: hohe E-Saite)
+  bpm: 120,
+  beats: 4, denom: 4,
+  tracks: []                 // {bpm, beats, denom, bars}
+};
+let loaded = false;
+
+function load(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw){
+      const d = JSON.parse(raw);
+      Object.assign(state, d);
+      // Migration: fehlende Felder ergänzen
+      if(!Array.isArray(state.tracks)) state.tracks = [];
+    }
+  }catch(e){ /* Notfalls default */ }
+  loaded = true;
+}
+function save(){
+  if(!loaded) return;
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+  catch(e){ console.warn("Speichern fehlgeschlagen", e); }
+}
+window.addEventListener("pagehide", save);
+window.addEventListener("beforeunload", save);
+
+/* ===== 3. UI / Navigation & Theme ===== */
+function showView(id){
+  document.querySelectorAll("view-section").forEach(v => v.classList.toggle("active", v.id === id));
+  document.querySelectorAll("nav.bottom .navbtn").forEach(b => b.classList.toggle("active", b.dataset.view === id));
+  window.scrollTo(0,0);
+}
+document.querySelectorAll("nav.bottom .navbtn").forEach(btn =>
+  btn.addEventListener("click", () => showView(btn.dataset.view)));
+document.getElementById("homeBtn").addEventListener("click", () => showView("viewTuner"));
+document.getElementById("helpBtn").addEventListener("click", () => document.getElementById("helpDlg").showModal());
+
+// Theme: OS-Vorgabe als Standard, manuell umschaltbar
+function applyTheme(t){
+  if(t === "auto") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.dataset.theme = t;
+}
+let themePref = localStorage.getItem("gitToolTheme") || "auto";
+applyTheme(themePref);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if(themePref==="auto") applyTheme("auto"); });
+document.getElementById("themeBtn").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme;
+  themePref = (cur === "dark") ? "light" : "dark";
+  localStorage.setItem("gitToolTheme", themePref);
+  applyTheme(themePref);
+});
+
+/* ===== 4. Stimmgerät ===== */
+let audioCtx=null, micStream=null, analyser=null, pitchRunning=false;
+const needle=document.getElementById("needle");
+const targetHzEl=document.getElementById("targetHz");
+const centOffEl=document.getElementById("centOff");
+const stringListEl=document.getElementById("stringList");
+const micWarn=document.getElementById("micWarn");
+
+// Saiten-Buttons aufbauen
+STD_STRINGS.forEach((s,i)=>{
+  const b=document.createElement("button");
+  b.className="stringBtn"+(i===state.activeString?" active":"");
+  b.innerHTML=`${s.note}<small>${s.hz.toFixed(2)} Hz</small>`;
+  b.addEventListener("click",()=>{
+    state.activeString=i;
+    document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    save(); updateTunerUI();
+  });
+  stringListEl.appendChild(b);
+});
+
+// Kammerton-Input
+const a4Input=document.getElementById("a4Input");
+a4Input.value=state.a4;
+a4Input.addEventListener("change",()=>{
+  let v=parseFloat(a4Input.value);
+  if(isNaN(v)) v=440;
+  state.a4=Math.min(450,Math.max(430,v));
+  a4Input.value=state.a4;
+  save(); updateTunerUI();
+});
+
+// Modi-Umschalter
+document.querySelectorAll('input[name="tunerMode"]').forEach(r=>
+  r.addEventListener("change",()=>{
+    state.tunerMode=document.querySelector('input[name="tunerMode"]:checked').value;
+    save(); updateTunerUI();
+  }));
+
+function setActiveModeRadio(){
+  document.querySelectorAll('input[name="tunerMode"]').forEach(r=> r.checked = (r.value===state.tunerMode));
+}
+
+// Referenzton (einfacher Oszillator-Blip)
+let refOsc=null;
+document.getElementById("refToneBtn").addEventListener("click",()=>{
+  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(refOsc){ refOsc.stop(); refOsc=null; return; }
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.frequency.value=stringFreq(state.activeString);
+  o.type="sine"; g.gain.value=0.25;
+  o.connect(g).connect(audioCtx.destination);
+  o.start(); refOsc=o;
+  setTimeout(()=>{ if(refOsc===o){ o.stop(); refOsc=null; } },2000);
+});
+
+function stringFreq(i){ return STD_STRINGS[i].hz * state.a4/440; }
+
+// Nadel steuern: für Saitenmodus relativ zur Ziel-Saite, Frei-Modus logarithmisch über den ganzen Bereich
+function setNeedle(hz, targetHz, mode){
+  let pct;
+  if(mode==="strings"){
+    // ±100 Cent → Nadel von -45° bis +45°
+    const cents=1200*Math.log2(hz/targetHz);
+    const clamped=Math.max(-100,Math.min(100,cents));
+    pct=(clamped+100)/200;               // 0..1
+    needle.style.transform=`rotate(${(pct-0.5)*90}deg)`;
+    centOffEl.textContent=`${cents>=0?"+":""}${cents.toFixed(1)} Cent (${cents>5?"zu hoch":cents<-5?"zu tief":"gut ✓"})`;
+    needle.style.background = Math.abs(cents)<=5 ? getComputedStyle(document.documentElement).getPropertyValue("--green") : "";
+  }else{
+    // Logarithmische Skala über FREE_MIN_HZ..FREE_MAX_HZ
+    const lo=Math.log2(FREE_MIN_HZ), hi=Math.log2(FREE_MAX_HZ);
+    pct=(Math.log2(Math.min(FREE_MAX_HZ,Math.max(FREE_MIN_HZ,hz)))-lo)/(hi-lo);
+    needle.style.left=(pct*100)+"%";
+    needle.style.bottom="0";
+    needle.style.transform="none";
+    needle.style.width="3px"; needle.style.height="80%";
+    // nächste Saite anzeigen
+    let best=STD_STRINGS[0],bd=Infinity;
+    STD_STRINGS.forEach(s=>{ const d=Math.abs(1200*Math.log2(hz/s.hz*440/state.a4)); if(d<bd){bd=d;best=s;} });
+    targetHzEl.textContent=`≈ ${best.note}`;
+    centOffEl.textContent=`Erkannt: ${hz.toFixed(1)} Hz · nächstgelegene Saite: ${best.note} (${(best.hz*state.a4/440).toFixed(2)} Hz)`;
+    needle.style.background="";
+  }
+}
+
+function updateTunerUI(){
+  const mode=state.tunerMode;
+  setActiveModeRadio();
+  if(mode==="strings"){
+    const f=stringFreq(state.activeString);
+    targetHzEl.textContent=`${STD_STRINGS[state.activeString].note} · ${f.toFixed(2)} Hz`;
+    centOffEl.textContent="Nadel zeigt Abweichung ±100 Cent";
+    needle.style.left="50%"; needle.style.transform="rotate(0deg)";
+    needle.style.width="3px"; needle.style.height="60%";
+  }else{
+    targetHzEl.textContent="Freier Modus";
+    centOffEl.textContent="Nadel wandert über 70–450 Hz, nächste Saite wird angezeigt";
+  }
+}
+updateTunerUI();
+
+// Pitch-Erkennung per Autokorrelation (ACF mit Normalisierung)
+function detectPitch(buf, sampleRate){
+  const SIZE=buf.length;
+  let rms=0;
+  for(let i=0;i<SIZE;i++){ const v=buf[i]; rms+=v*v; }
+  rms=Math.sqrt(rms/SIZE);
+  if(rms<0.01) return -1;                       // zu leise
+  let r1=0,r2=SIZE-1,thr=0.2;
+  for(let i=0;i<SIZE/2;i++) if(Math.abs(buf[i])<thr){ r1=i; break; }
+  for(let i=1;i<SIZE/2;i++) if(Math.abs(buf[SIZE-i])<thr){ r2=SIZE-i; break; }
+  const b=buf.slice(r1,r2), N=b.length;
+  const c=new Array(N).fill(0);
+  for(let lag=0;lag<N;lag++)
+    for(let i=0;i<N-lag;i++) c[lag]+=b[i]*b[i+lag];
+  let d=0; while(d<N-1 && c[d]>c[d+1]) d++;
+  let maxval=-1,maxpos=-1;
+  for(let i=d;i<N;i++) if(c[i]>maxval){ maxval=c[i]; maxpos=i; }
+  if(maxpos<=0) return -1;
+  let T0=maxpos;
+  // parabolische Interpolation
+  const x1=c[T0-1]||0, x2=c[T0], x3=c[T0+1]||0;
+  const a=(x1+x3-2*x2)/2, bb=(x3-x1)/2;
+  if(a) T0=T0-bb/(2*a);
+  return sampleRate/T0;
+}
+
+document.getElementById("micBtn").addEventListener("click", async function(){
+  if(pitchRunning){
+    pitchRunning=false;
+    micStream.getTracks().forEach(t=>t.stop());
+    micStream=null;
+    this.textContent="🎙️ Mikrofon starten";
+    return;
+  }
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    await audioCtx.resume();
+    const src=audioCtx.createMediaStreamSource(micStream);
+    analyser=audioCtx.createAnalyser();
+    analyser.fftSize=PITCH_BUF;
+    src.connect(analyser);
+    pitchRunning=true;
+    this.textContent="⏹ Mikrofon stoppen";
+    micWarn.style.display="none";
+    loopPitch();
+  }catch(e){
+    micWarn.style.display="block";
+  }
+});
+
+function loopPitch(){
+  if(!pitchRunning) return;
+  const buf=new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(buf);
+  const hz=detectPitch(buf,audioCtx.sampleRate);
+  if(hz>0){
+    if(state.tunerMode==="strings"){
+      setNeedle(hz,stringFreq(state.activeString),"strings");
+      // zusätzlich erkannte Frequenz anzeigen
+      targetHzEl.textContent=`${STD_STRINGS[state.activeString].note} · ${stringFreq(state.activeString).toFixed(2)} Hz (erkannt ${hz.toFixed(1)} Hz)`;
+    }else{
+      setNeedle(hz,null,"free");
+    }
+  }
+  requestAnimationFrame(loopPitch);
+}
+
+/* ===== 5. Metronom ===== */
+let metroOn=false, nextBeatTime=0, beatCount=0, schedTimer=null;
+let seqMode=false, seqIdx=0, seqBeatInBar=0, seqBarInTrack=0;
+const startStopBtn=document.getElementById("startStopBtn");
+const bpmBig=document.getElementById("bpmBig");
+const bpmInput=document.getElementById("bpmInput");
+const tsSelect=document.getElementById("tsSelect");
+const tsCustomBeats=document.getElementById("tsCustomBeats");
+const tsCustomDen=document.getElementById("tsCustomDen");
+const beatDots=document.getElementById("beatDots");
+const metroStatus=document.getElementById("metroStatus");
+
+bpmInput.value=state.bpm;
+bpmInput.addEventListener("change",()=>{
+  let v=parseInt(bpmInput.value,10);
+  if(isNaN(v)) v=120;
+  state.bpm=Math.min(300,Math.max(20,v));
+  bpmInput.value=state.bpm; bpmBig.innerHTML=`${state.bpm} <span class="muted" style="font-size:16px;">BPM</span>`;
+  save();
+});
+bpmInput.addEventListener("input",()=>{ // live-Anzeige beim Tippen
+  let v=parseInt(bpmInput.value,10);
+  if(!isNaN(v)&&v>=20&&v<=300) bpmBig.innerHTML=`${v} <span class="muted" style="font-size:16px;">BPM</span>`;
+});
+
+tsSelect.addEventListener("change",()=>{
+  const custom = tsSelect.value==="custom";
+  tsCustomBeats.style.display=custom?"":"none";
+  tsCustomDen.style.display=custom?"":"none";
+  if(!custom){
+    const [b,d]=tsSelect.value.split("/").map(Number);
+    state.beats=b; state.denom=d;
+  }else{
+    state.beats=parseInt(tsCustomBeats.value,10)||7;
+    state.denom=parseInt(tsCustomDen.value,10)||8;
+  }
+  save(); buildBeatDots();
+});
+tsCustomBeats.addEventListener("change",()=>{ state.beats=Math.min(16,Math.max(2,parseInt(tsCustomBeats.value,10)||7)); save(); buildBeatDots(); });
+tsCustomDen.addEventListener("change",()=>{ state.denom=Math.min(32,Math.max(2,parseInt(tsCustomDen.value,10)||8)); save(); });
+// Auswahl im Select restaurieren
+(function restoreTS(){
+  const val=`${state.beats}/${state.denom}`;
+  const opt=[...tsSelect.options].find(o=>o.value===val);
+  if(opt) tsSelect.value=val; else { tsSelect.value="custom"; tsCustomBeats.value=state.beats; tsCustomDen.value=state.denom; tsCustomBeats.style.display=""; tsCustomDen.style.display=""; }
+})();
+
+function beatSeconds(beats,denom,bpm){
+  // Beat-Dauer: viertel-Referenz; Nenner 8 → halbe Viertel-Dauer usw.
+  return (60/bpm) * (4/denom);
+}
+
+function buildBeatDots(){
+  beatDots.innerHTML="";
+  for(let i=0;i<state.beats;i++){
+    const d=document.createElement("div");
+    d.className="dot"+(i===0?" accent":"");
+    beatDots.appendChild(d);
+  }
+}
+buildBeatDots();
+
+// Tap-Tempo: Median der letzten Intervalle
+let taps=[];
+document.getElementById("tapBtn").addEventListener("click",()=>{
+  const now=performance.now();
+  if(taps.length && now-taps[taps.length-1] > 2500) taps=[];   // Reset nach Pause
+  taps.push(now);
+  if(taps.length>8) taps.shift();
+  if(taps.length>=2){
+    const iv=[];
+    for(let i=1;i<taps.length;i++) iv.push(taps[i]-taps[i-1]);
+    iv.sort((a,b)=>a-b);
+    const med=iv[Math.floor(iv.length/2)];
+    let bpm=Math.round(60000/med);
+    bpm=Math.min(300,Math.max(20,bpm));
+    state.bpm=bpm; bpmInput.value=bpm;
+    bpmBig.innerHTML=`${bpm} <span class="muted" style="font-size:16px;">BPM</span>`;
+    save();
+    metroStatus.textContent=`Tap: ${bpm} BPM`;
+  }
+});
+
+// Ton-Erzeugung
+function click(time,accent){
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.frequency.value = accent ? 1600 : 800;
+  g.gain.setValueAtTime(accent?0.6:0.35,time);
+  g.gain.exponentialRampToValueAtTime(0.001,time+0.06);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(time); o.stop(time+0.07);
+}
+
+// Scheduling-Loop (Web-Audio-Clock, Vorlauf 0.1 s)
+function scheduler(){
+  const lookahead=0.1;
+  while(nextBeatTime < audioCtx.currentTime + lookahead){
+    scheduleBeat(nextBeatTime);
+    nextBeatTime += beatSeconds(state.beats,state.denom,state.bpm);
+  }
+}
+function scheduleBeat(t){
+  const accent = beatCount % state.beats === 0;
+  click(t, accent);
+  // Visuals leicht verzögert passend zur Audio-Zeit
+  const delayMs=(t-audioCtx.currentTime)*1000;
+  setTimeout(()=>{
+    const dots=beatDots.children;
+    for(let i=0;i<dots.length;i++) dots[i].classList.toggle("on", i===(beatCount%state.beats));
+    metroStatus.textContent=`Schlag ${beatCount%state.beats+1} / ${state.beats}`;
+    beatCount++;
+  },Math.max(0,delayMs));
+}
+
+function startMetro(){
+  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  audioCtx.resume();
+  beatCount=0;
+  nextBeatTime=audioCtx.currentTime+0.1;
+  schedTimer=setInterval(scheduler,25);
+  metroOn=true;
+  startStopBtn.textContent="⏹ Stop";
+}
+function stopMetro(){
+  clearInterval(schedTimer); metroOn=false;
+  startStopBtn.textContent="▶ Start";
+  [...beatDots.children].forEach(d=>d.classList.remove("on"));
+  metroStatus.textContent="Bereit";
+}
+startStopBtn.addEventListener("click",()=> metroOn?stopMetro():startMetro());
+
+/* ===== 6. Spuren-/Sequenz-Editor ===== */
+const trackListEl=document.getElementById("trackList");
+
+function renderTracks(){
+  trackListEl.innerHTML="";
+  state.tracks.forEach((tr,i)=>{
+    const div=document.createElement("div");
+    div.className="trackItem";
+    div.innerHTML=`
+      <label>BPM <input type="number" class="trBpm" value="${tr.bpm}" min="20" max="300" style="width:65px;"></label>
+      <label>Zähler <input type="number" class="trBeats" value="${tr.beats}" min="2" max="16" style="width:55px;"></label>
+      <label>Nenner <input type="number" class="trDen" value="${tr.denom}" min="2" max="32" style="width:55px;"></label>
+      <label>Takte <input type="number" class="trBars" value="${tr.bars}" min="1" max="128" style="width:55px;"></label>
+      <button class="btn small ghost delBtn" data-i="${i}">🗑</button>`;
+    div.querySelector(".trBpm").addEventListener("change",e=>{ tr.bpm=Math.min(300,Math.max(20,parseInt(e.target.value,10)||120)); save(); });
+    div.querySelector(".trBeats").addEventListener("change",e=>{ tr.beats=Math.min(16,Math.max(2,parseInt(e.target.value,10)||4)); save(); });
+    div.querySelector(".trDen").addEventListener("change",e=>{ tr.denom=Math.min(32,Math.max(2,parseInt(e.target.value,10)||4)); save(); });
+    div.querySelector(".trBars").addEventListener("change",e=>{ tr.bars=Math.min(128,Math.max(1,parseInt(e.target.value,10)||4)); save(); });
+    div.querySelector(".delBtn").addEventListener("click",()=>{ state.tracks.splice(i,1); save(); renderTracks(); });
+    trackListEl.appendChild(div);
+  });
+}
+document.getElementById("addTrackBtn").addEventListener("click",()=>{
+  state.tracks.push({bpm:state.bpm,beats:state.beats,denom:state.denom,bars:4});
+  save(); renderTracks();
+});
+document.getElementById("clearTracksBtn").addEventListener("click",()=>{
+  if(confirm("Wirklich alle Abschnitte löschen?")){ state.tracks=[]; save(); renderTracks(); }
+});
+renderTracks();
+
+// Sequenz-Wiedergabe: läuft Abschnitt für Abschnitt ab
+document.getElementById("playSeqBtn").addEventListener("click",function(){
+  if(seqMode){ stopMetro(); seqMode=false; this.textContent="▶ Sequenz abspielen"; return; }
+  if(!state.tracks.length){ alert("Bitte zuerst mindestens einen Abschnitt anlegen."); return; }
+  seqMode=true; seqIdx=0; seqBarInTrack=0; seqBeatInBar=0;
+  this.textContent="⏹ Sequenz stoppen";
+  startStopBtn.textContent="⏹ Stop"; metroOn=true;
+  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  audioCtx.resume();
+  startSeqTrack();
+});
+function startSeqTrack(){
+  const tr=state.tracks[seqIdx];
+  state.bpm=tr.bpm; state.beats=tr.beats; state.denom=tr.denom;
+  bpmInput.value=tr.bpm; bpmBig.innerHTML=`${tr.bpm} <span class="muted" style="font-size:16px;">BPM</span>`;
+  tsSelect.value=`${tr.beats}/${tr.denom}`;
+  if(![...tsSelect.options].some(o=>o.value===tsSelect.value)){ tsSelect.value="custom"; tsCustomBeats.value=tr.beats; tsCustomDen.value=tr.denom; tsCustomBeats.style.display=""; tsCustomDen.style.display=""; }
+  buildBeatDots();
+  metroStatus.textContent=`Abschnitt ${seqIdx+1}/${state.tracks.length}: ${tr.bpm} BPM, ${tr.beats}/${tr.denom}`;
+  beatCount=0; seqBeatInBar=0;
+  nextBeatTime=audioCtx.currentTime+0.1;
+  clearInterval(schedTimer);
+  schedTimer=setInterval(seqScheduler,25);
+}
+function seqScheduler(){
+  const tr=state.tracks[seqIdx];
+  const beatsPerBar=tr.beats;
+  const barLen=beatSeconds(tr.beats,tr.denom,tr.bpm)*beatsPerBar;
+  while(nextBeatTime < audioCtx.currentTime+0.1){
+    scheduleBeat(nextBeatTime);
+    nextBeatTime+=beatSeconds(tr.beats,tr.denom,tr.bpm);
+    seqBeatInBar++;
+    if(seqBeatInBar>=beatsPerBar){
+      seqBeatInBar=0; seqBarInTrack++;
+      if(seqBarInTrack>=tr.bars){
+        seqBarInTrack=0; seqIdx++;
+        if(seqIdx>=state.tracks.length){ stopMetro(); seqMode=false; document.getElementById("playSeqBtn").textContent="▶ Sequenz abspielen"; return; }
+        startSeqTrack();  // wechselt sofort zu nächstem Abschnitt
+        return;
+      }
+    }
+  }
+}
+
+/* ===== 7. Export/Import ===== */
+document.getElementById("exportBtn").addEventListener("click",()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="gitarren-tool-export.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+document.getElementById("importBtn").addEventListener("click",()=>document.getElementById("importFile").click());
+document.getElementById("importFile").addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const d=JSON.parse(r.result);
+      if(!confirm("Importierte Daten ersetzen die aktuellen Einstellungen und Spuren?")) return;
+      Object.assign(state,d);
+      if(!Array.isArray(state.tracks)) state.tracks=[];
+      save();
+      a4Input.value=state.a4; bpmInput.value=state.bpm; renderTracks(); updateTunerUI(); buildBeatDots();
+      alert("Import erfolgreich.");
+    }catch(err){ alert("Import fehlgeschlagen: ungültige Datei."); }
+  };
+  r.readAsText(f);
+});
+
+load();
+save();
+</script>
+</body>
+</html>
