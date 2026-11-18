@@ -1,13 +1,19 @@
 <!DOCTYPE html>
 <!--
-  Gitarren-Tool (Stimmgerät & Metronom) - v1.1 (18.11.2026)
+  Gitarren-Tool (Stimmgerät & Metronom) - v1.2 (18.11.2026)
   - v1.0 (18.11.2026): Erste Version: Stimmgerät (Saiten- & Freier-Modus,
     Referenzton, einstellbarer Kammerton) und Metronom (BPM, Tap-Tempo,
     variable Taktarten, Spuren/Sequenzen-Editor, lokale Speicherung).
   - v1.1 (18.11.2026): Tuner zeigt Notennamen & Frequenzbereich (inkl.
     Notenskala im Frei-Modus). Metronom: Überlagerung von Sequenzen
-    behoben (nur eine Engine aktiv), Abschnitte verschiebar (↑/↓),
-    Duplizieren (⧉), Sequenz-Menü ausklappbar.
+    behoben, Abschnitte verschiebar (↑/↓), Duplizieren (⧉),
+    Sequenz-Menü ausklappbar.
+  - v1.2 (18.11.2026): Abschnitte per Antippen+Halten ziehen (Pfeile
+    entfernt). Kompakte Darstellung "4× 3/4" statt separater Felder
+    (klickbar zum Bearbeiten). Bug behoben: Sequenzen erscheinen jetzt
+    direkt nach Seiten-Reload. Theme-Icons ☀️/🌙 je nach Modus.
+    Stimmgerät: Frequenzbereich (Noten-Grenzen) wird auch für die
+    erkannte Note angezeigt.
   - Design und Aufbau orientiert sich an what_to_do-v1.6.html
 -->
 <html lang="de">
@@ -46,7 +52,8 @@
 
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{background:var(--bg);color:var(--ink);transition:background .45s ease,color .45s ease;}
-  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:16px;line-height:1.45;}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:16px;line-height:1.45;-webkit-user-select:none;user-select:none;}
+  input,textarea{-webkit-user-select:text;user-select:text;}
 
   main{max-width:640px;margin:0 auto;padding:16px 16px 90px;}
 
@@ -145,9 +152,19 @@
   .trackItem{
     display:flex;gap:8px;align-items:center;flex-wrap:wrap;
     background:var(--surface);border-radius:10px;padding:10px;margin-bottom:8px;
+    touch-action:pan-y;
   }
-  .trackItem .orderTag{font-size:12px;font-weight:700;color:var(--muted);min-width:22px;}
+  .trackItem.dragging{opacity:.5;outline:2px dashed var(--red);}
+  .trackItem .orderTag{font-size:12px;font-weight:700;color:var(--muted);min-width:22px;cursor:grab;}
+  .trackItem .tsBadge{
+    font-weight:700;font-size:14px;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:4px 8px;cursor:pointer;
+  }
+  .trackItem .tsEdit{display:none;gap:6px;align-items:center;flex-wrap:wrap;}
+  .trackItem.editing .tsBadge{display:none;}
+  .trackItem.editing .tsEdit{display:flex;}
   .trackItem .spacer{margin-left:auto;}
+  .dragHint{font-size:12px;color:var(--muted);margin:4px 0 10px;}
   footer.muted{margin-top:20px;text-align:center;font-size:12px;}
 </style>
 </head>
@@ -156,7 +173,7 @@
 <header>
   <h1 id="homeBtn">🎸 Gitarren-Tool</h1>
   <button class="btn ghost small" id="helpBtn" title="Hilfe">?</button>
-  <button class="btn ghost small" id="themeBtn" title="Farbwechsel">🌗</button>
+  <button class="btn ghost small" id="themeBtn" title="Farbwechsel">☀️</button>
 </header>
 
 <div class="warnbar" id="micWarn" style="display:none;max-width:640px;margin:12px auto 0;padding:0 16px;">
@@ -234,10 +251,11 @@
     <details class="card seqCard" id="seqCard">
       <summary>🥁 Spuren / Sequenzen <span class="muted" id="seqSummaryInfo"></span></summary>
       <div style="margin-top:12px;">
-        <p class="muted" style="margin-bottom:10px;">
-          Abschnitte mit BPM, Taktart und Takte-Anzahl. Sie werden beim Abspielen
-          nacheinander in dieser Reihenfolge durchlaufen (↑/↓ zum Verschieben, ⧉ zum Duplizieren).
+        <p class="muted" style="margin-bottom:4px;">
+          Abschnitte mit BPM, Taktart (kompakt als „4× 3/4") und Takte-Anzahl.
+          Taktart-Badge antippen zum Bearbeiten.
         </p>
+        <p class="dragHint">✋ Abschnitt antippen und <strong>halten</strong>, dann ziehen zum Verschieben.</p>
         <div id="trackList"></div>
         <div class="row">
           <button class="btn small" id="addTrackBtn">+ Abschnitt</button>
@@ -264,8 +282,8 @@
 <dialog id="helpDlg">
   <div class="dlg-head"><strong>Hilfe</strong><button class="btn small ghost" onclick="this.closest('dialog').close()">Schließen</button></div>
   <div class="dlg-body">
-    <p><strong>Stimmgerät:</strong> Mikrofon starten, Saite wählen (oder „Frei"-Modus). Die erkannte Note und ihre Frequenz werden angezeigt; im Frei-Modus wandert die Nadel über 70–450 Hz, mit Notenskala der Saiten über dem Display. Mit 🔊 hörst du die Referenzfrequenz der gewählten Saite.</p>
-    <p style="margin-top:8px;"><strong>Metronom:</strong> BPM eintippen oder per 👋 Tap eintakten. Taktart wählen oder eigene (Zähler/Nenner) angeben. Im ausklappbaren Sequenz-Menü baust du Abschnitte, verschiebst sie per ↑/↓, duplizierst per ⧉ und spielst sie nacheinander ab. Während eine Sequenz läuft, ist der normale Start-Button pausiert (keine Überlagerung). Alles wird lokal gespeichert.</p>
+    <p><strong>Stimmgerät:</strong> Mikrofon starten, Saite wählen (oder „Frei"-Modus). Die erkannte Note, ihre Frequenz und der zugehörige Frequenzbereich (Grenzen zur Nachbar-Note) werden angezeigt. Mit 🔊 hörst du die Referenzfrequenz der gewählten Saite.</p>
+    <p style="margin-top:8px;"><strong>Metronom:</strong> BPM eintippen oder per 👋 Tap eintakten. Taktart wählen oder eigene (Zähler/Nenner) angeben. Im Sequenz-Menü baust du Abschnitte (kompakt „4× 3/4", Badge antippen zum Bearbeiten), verschiebst sie per Antippen+Halten-Ziehen, duplizierst per ⧉ und spielst sie nacheinander ab. Während eine Sequenz läuft, ist der normale Start-Button pausiert. Alles wird lokal gespeichert.</p>
   </div>
 </dialog>
 
@@ -274,11 +292,12 @@
 /* =====================================================================
    Abschnitte im Skript:
    1. Konstanten & Defaults
-   2. Zustand & Persistenz
+   2. Zustand & Persistenz  (load() jetzt FRÜH, damit die UI direkt
+      nach Reload die gespeicherten Daten anzeigt)
    3. UI / Navigation & Theme
-   4. Stimmgerät (Mikrofon, Pitch-Erkennung, Referenzton, Notenanzeige)
-   5. Metronom (Engine, Tap, Taktarten, Überlagerungsschutz)
-   6. Spuren-/Sequenz-Editor (verschieben, duplizieren)
+   4. Stimmgerät (Pitch, Notenanzeige inkl. Frequenzbereich)
+   5. Metronom (Engine, Tap, Überlagerungsschutz)
+   6. Spuren-Editor (Drag per Halten, kompakte Taktart-Anzeige)
    7. Export/Import
    ===================================================================== */
 
@@ -295,8 +314,9 @@ const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const FREE_MIN_HZ = 70, FREE_MAX_HZ = 450;
 const STORE_KEY   = "gitToolData";
 const PITCH_BUF   = 2048;
+const HOLD_MS     = 350;   // Haltezeit, bevor Ziehen aktiv wird
 
-/* ===== 2. Zustand & Persistenz ===== */
+/* ===== 2. Zustand & Persistenz (früh laden!) ===== */
 let state = {
   a4: 440,
   tunerMode: "strings",
@@ -304,7 +324,7 @@ let state = {
   bpm: 120,
   beats: 4, denom: 4,
   tracks: [],
-  seqOpen: true               // Merker: Sequenz-Menü ausgeklappt?
+  seqOpen: true
 };
 let loaded = false;
 
@@ -324,6 +344,7 @@ function save(){
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
   catch(e){ console.warn("Speichern fehlgeschlagen", e); }
 }
+load();                       // ← WICHTIG: vor dem ersten UI-Aufbau
 window.addEventListener("pagehide", save);
 window.addEventListener("beforeunload", save);
 
@@ -332,7 +353,7 @@ function showView(id){
   document.querySelectorAll("view-section").forEach(v => v.classList.toggle("active", v.id === id));
   document.querySelectorAll("nav.bottom .navbtn").forEach(b => b.classList.toggle("active", b.dataset.view === id));
   window.scrollTo(0,0);
-  if(id !== "viewMetro" && metroOn) stopAll();  // Ansicht wechseln stoppt die Engine sauber
+  if(id !== "viewMetro" && engineMode) stopAll();
 }
 document.querySelectorAll("nav.bottom .navbtn").forEach(btn =>
   btn.addEventListener("click", () => showView(btn.dataset.view)));
@@ -342,6 +363,11 @@ document.getElementById("helpBtn").addEventListener("click", () => document.getE
 function applyTheme(t){
   if(t === "auto") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   document.documentElement.dataset.theme = t;
+  updateThemeIcon();
+}
+function updateThemeIcon(){
+  const dark = document.documentElement.dataset.theme === "dark";
+  document.getElementById("themeBtn").textContent = dark ? "🌙" : "☀️";
 }
 let themePref = localStorage.getItem("gitToolTheme") || "auto";
 applyTheme(themePref);
@@ -364,18 +390,42 @@ const rangeInfoEl=document.getElementById("rangeInfo");
 const stringListEl=document.getElementById("stringList");
 const micWarn=document.getElementById("micWarn");
 
+function stringFreq(i){ return STD_STRINGS[i].hz * state.a4/440; }
+
+// Notenname + exakte Frequenz + Cent-Abweichung aus Frequenz
+function noteFromHz(hz){
+  const n = Math.round(12*Math.log2(hz/state.a4)) + 57;
+  const name = NOTE_NAMES[((n%12)+12)%12];
+  const octave = Math.floor(n/12) - 1;
+  const exactHz = state.a4 * Math.pow(2,(n-69)/12);
+  const cents = 1200*Math.log2(hz/exactHz);
+  return {name:name+octave, midi:n, exactHz, cents};
+}
+// Frequenz-Grenzen einer MIDI-Note: halber Abstand (50 Cent) zur Nachbarnote
+function noteRange(midi){
+  const lo = state.a4 * Math.pow(2,(midi-69.5)/12);  // Grenze zur Note darunter (-50 Cent)
+  const hi = state.a4 * Math.pow(2,(midi-68.5)/12);  // Grenze zur Note darüber  (+50 Cent)
+  return {lo, hi};
+}
+
+// Saiten-Buttons
+function refreshStringButtons(){
+  document.querySelectorAll(".stringBtn").forEach((b,i)=>{
+    b.innerHTML=`${STD_STRINGS[i].note}<small>${(STD_STRINGS[i].hz*state.a4/440).toFixed(2)} Hz</small>`;
+    b.classList.toggle("active", i===state.activeString);
+  });
+}
 STD_STRINGS.forEach((s,i)=>{
   const b=document.createElement("button");
-  b.className="stringBtn"+(i===state.activeString?" active":"");
-  b.innerHTML=`${s.note}<small>${(s.hz*state.a4/440).toFixed(2)} Hz</small>`;
+  b.className="stringBtn";
   b.addEventListener("click",()=>{
     state.activeString=i;
-    document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
-    b.classList.add("active");
-    save(); renderStringLabels(); updateTunerUI();
+    refreshStringButtons();
+    save(); updateTunerUI();
   });
   stringListEl.appendChild(b);
 });
+refreshStringButtons();
 
 const a4Input=document.getElementById("a4Input");
 a4Input.value=state.a4;
@@ -384,7 +434,7 @@ a4Input.addEventListener("change",()=>{
   if(isNaN(v)) v=440;
   state.a4=Math.min(450,Math.max(430,v));
   a4Input.value=state.a4;
-  save(); renderStringLabels(); refreshStringButtons(); updateTunerUI();
+  save(); refreshStringButtons(); updateTunerUI();
 });
 
 document.querySelectorAll('input[name="tunerMode"]').forEach(r=>
@@ -392,7 +442,6 @@ document.querySelectorAll('input[name="tunerMode"]').forEach(r=>
     state.tunerMode=document.querySelector('input[name="tunerMode"]:checked').value;
     save(); renderStringLabels(); updateTunerUI();
   }));
-
 function setActiveModeRadio(){
   document.querySelectorAll('input[name="tunerMode"]').forEach(r=> r.checked = (r.value===state.tunerMode));
 }
@@ -410,23 +459,10 @@ document.getElementById("refToneBtn").addEventListener("click",()=>{
   setTimeout(()=>{ if(refOsc===o){ o.stop(); refOsc=null; } },2000);
 });
 
-function stringFreq(i){ return STD_STRINGS[i].hz * state.a4/440; }
-
-// Notenname aus Frequenz berechnen (Halbtöne relativ zu A4)
-function noteFromHz(hz){
-  const n = Math.round(12*Math.log2(hz/state.a4)) + 57; // A4 = MIDI 69 → Index 57 = C0-basiert
-  const name = NOTE_NAMES[((n%12)+12)%12];
-  const octave = Math.floor(n/12) - 1;
-  const exactHz = state.a4 * Math.pow(2,(n-69)/12);
-  const cents = 1200*Math.log2(hz/exactHz);
-  return {name:name+octave, exactHz, cents};
-}
-
-/* --- Anzeige: Notenskala & Bereich im Display --- */
+/* --- Anzeige: Notenskala im Frei-Modus --- */
 function clearDisplayMarkers(){
   tunerDisplay.querySelectorAll(".noteMarker,.hzLabel").forEach(el=>el.remove());
 }
-// Logarithmische Position einer Frequenz im Frei-Modus (0..1)
 function freePos(hz){
   const lo=Math.log2(FREE_MIN_HZ), hi=Math.log2(FREE_MAX_HZ);
   return (Math.log2(Math.min(FREE_MAX_HZ,Math.max(FREE_MIN_HZ,hz)))-lo)/(hi-lo);
@@ -435,12 +471,13 @@ function renderStringLabels(){
   clearDisplayMarkers();
   if(state.tunerMode!=="free") return;
   STD_STRINGS.forEach(s=>{
-    const p=freePos(s.hz*state.a4/440)*100;
+    const f=s.hz*state.a4/440;
+    const p=freePos(f)*100;
     const nm=document.createElement("div");
     nm.className="noteMarker"; nm.textContent=s.note; nm.style.left=p+"%";
     tunerDisplay.appendChild(nm);
     const hl=document.createElement("div");
-    hl.className="hzLabel"; hl.textContent=s.hz.toFixed(0); hl.style.left=p+"%";
+    hl.className="hzLabel"; hl.textContent=f.toFixed(0); hl.style.left=p+"%";
     tunerDisplay.appendChild(hl);
   });
 }
@@ -466,25 +503,23 @@ function setNeedle(hz, targetHz, mode){
 
 function updateTunerUI(){
   setActiveModeRadio();
-  document.getElementById("rangeInfo").textContent =
-    state.tunerMode==="free"
-      ? "Frequenzbereich: 70 – 450 Hz (Skala logarithmisch)"
-      : `Aktuelle Saite: ${STD_STRINGS[state.activeString].note} · Bereich ±100 Cent um ${(stringFreq(state.activeString)).toFixed(2)} Hz`;
   if(state.tunerMode==="strings"){
-    const f=stringFreq(state.activeString);
-    detectedNoteEl.textContent=STD_STRINGS[state.activeString].note;
+    const i=state.activeString, f=stringFreq(i);
+    const info=noteFromHz(f);
+    const r=noteRange(info.midi);
+    detectedNoteEl.textContent=STD_STRINGS[i].note;
     targetHzEl.textContent=`Ziel: ${f.toFixed(2)} Hz`;
     centOffEl.textContent="Nadel zeigt Abweichung ±100 Cent";
-    needle.style.left="50%"; needle.style.transform="rotate(0deg)";
-    needle.style.width="3px"; needle.style.height="60%";
+    rangeInfoEl.textContent=`Frequenzbereich dieser Note: ${r.lo.toFixed(1)} – ${r.hi.toFixed(1)} Hz`;
   }else{
     detectedNoteEl.textContent="Freier Modus";
     targetHzEl.textContent="Erkenne Ton …";
     centOffEl.textContent="";
+    rangeInfoEl.textContent="Frequenzbereich: 70 – 450 Hz (Skala logarithmisch)";
   }
+  renderStringLabels();
 }
 updateTunerUI();
-renderStringLabels();
 
 function detectPitch(buf, sampleRate){
   const SIZE=buf.length;
@@ -542,17 +577,18 @@ function loopPitch(){
   const hz=detectPitch(buf,audioCtx.sampleRate);
   if(hz>0){
     const info=noteFromHz(hz);
+    const r=noteRange(info.midi);
     detectedNoteEl.textContent=`${info.name} · ${hz.toFixed(1)} Hz`;
     if(state.tunerMode==="strings"){
       setNeedle(hz,stringFreq(state.activeString),"strings");
       targetHzEl.textContent=`Ziel: ${STD_STRINGS[state.activeString].note} · ${stringFreq(state.activeString).toFixed(2)} Hz`;
     }else{
       setNeedle(hz,null,"free");
-      // nächste Saite als Zusatzinfo
       let best=STD_STRINGS[0],bd=Infinity;
       STD_STRINGS.forEach(s=>{ const dd=Math.abs(1200*Math.log2(hz/(s.hz*state.a4/440))); if(dd<bd){bd=dd;best=s;} });
       targetHzEl.textContent=`Nächstgelegene Saite: ${best.note} (${(best.hz*state.a4/440).toFixed(2)} Hz)`;
     }
+    centOffEl.textContent=`${info.cents>=0?"+":""}${info.cents.toFixed(1)} Cent · Bereich: ${r.lo.toFixed(1)} – ${r.hi.toFixed(1)} Hz`;
   }
   requestAnimationFrame(loopPitch);
 }
@@ -682,13 +718,12 @@ function scheduleBeatSimple(t){
   beatCount++;
 }
 
-/* Einfaches Metronom */
 startStopBtn.addEventListener("click",()=>{
   if(engineMode==="simple"){ stopAll(); return; }
-  if(engineMode==="sequence"){ stopAll(); }        // Überlagerung ausschließen
+  if(engineMode==="sequence"){ stopAll(); }
   ensureCtx();
   engineMode="simple";
-  playSeqBtn.disabled=true;                        // Sequenz-Start während Lauf sperren
+  playSeqBtn.disabled=true;
   startStopBtn.textContent="⏹ Stop";
   beatCount=0;
   nextBeatTime=audioCtx.currentTime+0.1;
@@ -702,33 +737,32 @@ startStopBtn.addEventListener("click",()=>{
 
 /* Sequenz-Wiedergabe */
 let seqIdx=0, seqBeatInBar=0, seqBarInTrack=0;
-function applyTrackToUI(tr, running){
+function applyTrackToUI(tr){
   state.bpm=tr.bpm; state.beats=tr.beats; state.denom=tr.denom;
   bpmInput.value=tr.bpm; syncBpmDisplay();
   const val=`${tr.beats}/${tr.denom}`;
   if([...tsSelect.options].some(o=>o.value===val)) tsSelect.value=val;
   else { tsSelect.value="custom"; tsCustomBeats.value=tr.beats; tsCustomDen.value=tr.denom; tsCustomBeats.style.display=""; tsCustomDen.style.display=""; }
   buildBeatDots();
-  if(running) metroStatus.textContent=`Abschnitt ${seqIdx+1}/${state.tracks.length}: ${tr.bpm} BPM, ${tr.beats}/${tr.denom}, Takt ${seqBarInTrack+1}/${tr.bars}`;
 }
 function startSeqTrack(first){
   const tr=state.tracks[seqIdx];
-  applyTrackToUI(tr,true);
+  applyTrackToUI(tr);
   beatCount=0; seqBeatInBar=0;
+  metroStatus.textContent=`Abschnitt ${seqIdx+1}/${state.tracks.length}: ${tr.bpm} BPM, ${tr.beats}/${tr.denom}, Takt ${seqBarInTrack+1}/${tr.bars}`;
   if(first) nextBeatTime=audioCtx.currentTime+0.1;
   clearInterval(engineTimer);
   engineTimer=setInterval(seqScheduler,25);
 }
 function seqScheduler(){
   const tr=state.tracks[seqIdx];
-  const beatsPerBar=tr.beats;
   while(nextBeatTime < audioCtx.currentTime + 0.1){
     const idx=seqBeatInBar;
     click(nextBeatTime, idx===0);
     flashBeat(nextBeatTime,idx);
     nextBeatTime += beatSeconds(tr.beats,tr.denom,tr.bpm);
     seqBeatInBar++;
-    if(seqBeatInBar>=beatsPerBar){
+    if(seqBeatInBar>=tr.beats){
       seqBeatInBar=0; seqBarInTrack++;
       if(seqBarInTrack>=tr.bars){
         seqBarInTrack=0; seqIdx++;
@@ -741,11 +775,11 @@ function seqScheduler(){
 }
 playSeqBtn.addEventListener("click",()=>{
   if(engineMode==="sequence"){ stopAll(); return; }
-  if(engineMode==="simple"){ stopAll(); }          // Überlagerung ausschließen
+  if(engineMode==="simple"){ stopAll(); }
   if(!state.tracks.length){ alert("Bitte zuerst mindestens einen Abschnitt anlegen."); return; }
   ensureCtx();
   engineMode="sequence";
-  startStopBtn.disabled=true;                      // Normal-Start während Sequenz sperren
+  startStopBtn.disabled=true;
   playSeqBtn.textContent="⏹ Sequenz stoppen";
   seqIdx=0; seqBarInTrack=0;
   startSeqTrack(true);
@@ -760,8 +794,13 @@ function updateSeqSummary(){
     state.tracks.length ? `(${state.tracks.length} Abschnitt${state.tracks.length>1?"e":""})` : "(leer)";
 }
 
-/* ===== 6. Spuren-/Sequenz-Editor (verschieben & duplizieren) ===== */
+/* ===== 6. Spuren-/Sequenz-Editor =====
+   - Kompakte Taktart-Anzeige: „4× 3/4" (Badge antippen = bearbeiten)
+   - Verschieben per Antippen+Halten und Ziehen (Pointer Events)     */
 const trackListEl=document.getElementById("trackList");
+let dragIdx=-1, holdTimer=null, holding=false, startY=0, curY=0;
+
+function tsBadgeText(tr){ return `${tr.bars}× ${tr.beats}/${tr.denom}`; }
 
 function renderTracks(){
   trackListEl.innerHTML="";
@@ -769,32 +808,81 @@ function renderTracks(){
     const div=document.createElement("div");
     div.className="trackItem";
     div.innerHTML=`
-      <span class="orderTag">${i+1}.</span>
+      <span class="orderTag" title="Halten & ziehen">✋ ${i+1}.</span>
       <label>BPM <input type="number" class="trBpm" value="${tr.bpm}" min="20" max="300" style="width:65px;"></label>
-      <label>Zähler <input type="number" class="trBeats" value="${tr.beats}" min="2" max="16" style="width:55px;"></label>
-      <label>Nenner <input type="number" class="trDen" value="${tr.denom}" min="2" max="32" style="width:55px;"></label>
-      <label>Takte <input type="number" class="trBars" value="${tr.bars}" min="1" max="128" style="width:55px;"></label>
+      <span class="tsBadge" title="Taktart bearbeiten">${tsBadgeText(tr)}</span>
+      <span class="tsEdit">
+        <input type="number" class="trBeats" value="${tr.beats}" min="2" max="16" style="width:55px;" title="Zähler"> /
+        <input type="number" class="trDen" value="${tr.denom}" min="2" max="32" style="width:55px;" title="Nenner"> ×
+        <input type="number" class="trBars" value="${tr.bars}" min="1" max="128" style="width:55px;" title="Takte">
+      </span>
       <span class="spacer"></span>
-      <button class="btn small ghost" data-act="up" data-i="${i}" title="Nach oben" ${i===0?"disabled":""}>↑</button>
-      <button class="btn small ghost" data-act="down" data-i="${i}" title="Nach unten" ${i===state.tracks.length-1?"disabled":""}>↓</button>
       <button class="btn small ghost" data-act="dup" data-i="${i}" title="Duplizieren (mehrfach klickbar)">⧉</button>
       <button class="btn small ghost" data-act="del" data-i="${i}" title="Löschen">🗑</button>`;
     div.querySelector(".trBpm").addEventListener("change",e=>{ tr.bpm=Math.min(300,Math.max(20,parseInt(e.target.value,10)||120)); save(); });
-    div.querySelector(".trBeats").addEventListener("change",e=>{ tr.beats=Math.min(16,Math.max(2,parseInt(e.target.value,10)||4)); save(); });
-    div.querySelector(".trDen").addEventListener("change",e=>{ tr.denom=Math.min(32,Math.max(2,parseInt(e.target.value,10)||4)); save(); });
-    div.querySelector(".trBars").addEventListener("change",e=>{ tr.bars=Math.min(128,Math.max(1,parseInt(e.target.value,10)||4)); save(); });
+    // Taktart-Badge: Klick = Bearbeitungsfelder zeigen
+    div.querySelector(".tsBadge").addEventListener("click",()=>div.classList.toggle("editing"));
+    const bIn=div.querySelector(".trBeats"), dIn=div.querySelector(".trDen"), barIn=div.querySelector(".trBars");
+    bIn.addEventListener("change",()=>{ tr.beats=Math.min(16,Math.max(2,parseInt(bIn.value,10)||4)); save(); div.querySelector(".tsBadge").textContent=tsBadgeText(tr); });
+    dIn.addEventListener("change",()=>{ tr.denom=Math.min(32,Math.max(2,parseInt(dIn.value,10)||4)); save(); div.querySelector(".tsBadge").textContent=tsBadgeText(tr); });
+    barIn.addEventListener("change",()=>{ tr.bars=Math.min(128,Math.max(1,parseInt(barIn.value,10)||4)); save(); div.querySelector(".tsBadge").textContent=tsBadgeText(tr); });
     div.querySelectorAll("button[data-act]").forEach(btn=>btn.addEventListener("click",()=>{
       const j=+btn.dataset.i;
-      if(btn.dataset.act==="up" && j>0){ [state.tracks[j-1],state.tracks[j]]=[state.tracks[j],state.tracks[j-1]]; }
-      if(btn.dataset.act==="down" && j<state.tracks.length-1){ [state.tracks[j+1],state.tracks[j]]=[state.tracks[j],state.tracks[j+1]]; }
-      if(btn.dataset.act==="dup"){ state.tracks.splice(j+1,0,{...state.tracks[j]}); }  // mehrfach kopierbar
+      if(btn.dataset.act==="dup"){ state.tracks.splice(j+1,0,{...state.tracks[j]}); }
       if(btn.dataset.act==="del"){ state.tracks.splice(j,1); }
-      save(); renderTracks(); updateSeqSummary();
+      save(); renderTracks();
     }));
+
+    /* --- Halten & Ziehen --- */
+    const handle = div.querySelector(".orderTag");
+    handle.addEventListener("pointerdown", ev=>{
+      if(engineMode) return;                     // während Wiedergabe nicht verschieben
+      handle.setPointerCapture(ev.pointerId);
+      startY=ev.clientY; curY=startY;
+      holding=false;
+      holdTimer=setTimeout(()=>{
+        holding=true; dragIdx=i;
+        div.classList.add("dragging");
+        if(navigator.vibrate) navigator.vibrate(30);
+      },HOLD_MS);
+    });
+    handle.addEventListener("pointermove", ev=>{
+      if(!holding) return;
+      curY=ev.clientY;
+      const dy=curY-startY;
+      const rowH=div.offsetHeight+8;             // Item-Höhe + margin
+      const shift=Math.round(dy/rowH);
+      const target=Math.min(state.tracks.length-1, Math.max(0, dragIdx+shift));
+      if(target!==dragIdx){
+        const moved=state.tracks.splice(dragIdx,1)[0];
+        state.tracks.splice(target,0,moved);
+        dragIdx=target; startY+=shift*rowH;
+        div.classList.remove("dragging");
+        renderTracksKeepDrag(target);
+      }
+    });
+    const endHold=()=>{
+      clearTimeout(holdTimer);
+      if(holding){
+        holding=false; dragIdx=-1;
+        save(); renderTracks(); updateSeqSummary();
+        return;
+      }
+    };
+    handle.addEventListener("pointerup",endHold);
+    handle.addEventListener("pointercancel",endHold);
+
     trackListEl.appendChild(div);
   });
   updateSeqSummary();
 }
+// Nach dem Verschieben: Liste neu zeichnen, aber das gezogene Element weiterhin als "dragging" markieren
+function renderTracksKeepDrag(idx){
+  renderTracks();
+  const el=trackListEl.children[idx];
+  if(el){ el.classList.add("dragging"); dragIdx=idx; }
+}
+
 document.getElementById("addTrackBtn").addEventListener("click",()=>{
   state.tracks.push({bpm:state.bpm,beats:state.beats,denom:state.denom,bars:4});
   save(); renderTracks();
@@ -802,7 +890,7 @@ document.getElementById("addTrackBtn").addEventListener("click",()=>{
 document.getElementById("clearTracksBtn").addEventListener("click",()=>{
   if(confirm("Wirklich alle Abschnitte löschen?")){ state.tracks=[]; save(); renderTracks(); }
 });
-renderTracks();
+renderTracks();          // ← mit geladenem state; erscheint jetzt direkt nach Reload
 
 /* ===== 7. Export/Import ===== */
 document.getElementById("exportBtn").addEventListener("click",()=>{
@@ -825,7 +913,7 @@ document.getElementById("importFile").addEventListener("change",e=>{
       if(!Array.isArray(state.tracks)) state.tracks=[];
       save();
       a4Input.value=state.a4; bpmInput.value=state.bpm; syncBpmDisplay();
-      renderStringLabels(); refreshStringButtons(); updateTunerUI(); buildBeatDots();
+      refreshStringButtons(); updateTunerUI(); buildBeatDots();
       renderTracks(); seqCard.open = !!state.seqOpen;
       alert("Import erfolgreich.");
     }catch(err){ alert("Import fehlgeschlagen: ungültige Datei."); }
@@ -833,14 +921,6 @@ document.getElementById("importFile").addEventListener("change",e=>{
   r.readAsText(f);
 });
 
-function refreshStringButtons(){
-  document.querySelectorAll(".stringBtn").forEach((b,i)=>{
-    b.innerHTML=`${STD_STRINGS[i].note}<small>${(STD_STRINGS[i].hz*state.a4/440).toFixed(2)} Hz</small>`;
-    b.classList.toggle("active", i===state.activeString);
-  });
-}
-
-load();
 save();
 </script>
 </body>
