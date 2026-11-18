@@ -1,9 +1,13 @@
 <!DOCTYPE html>
 <!--
-  Gitarren-Tool (Stimmgerät & Metronom) - v1.0 (18.11.2026)
-  - Erste Version: Stimmgerät (Saiten- & Freier-Modus, Referenzton,
-    einstellbarer Kammerton) und Metronom (BPM, Tap-Tempo, variable
-    Taktarten, Spuren/Sequenzen-Editor, lokale Speicherung).
+  Gitarren-Tool (Stimmgerät & Metronom) - v1.1 (18.11.2026)
+  - v1.0 (18.11.2026): Erste Version: Stimmgerät (Saiten- & Freier-Modus,
+    Referenzton, einstellbarer Kammerton) und Metronom (BPM, Tap-Tempo,
+    variable Taktarten, Spuren/Sequenzen-Editor, lokale Speicherung).
+  - v1.1 (18.11.2026): Tuner zeigt Notennamen & Frequenzbereich (inkl.
+    Notenskala im Frei-Modus). Metronom: Überlagerung von Sequenzen
+    behoben (nur eine Engine aktiv), Abschnitte verschiebar (↑/↓),
+    Duplizieren (⧉), Sequenz-Menü ausklappbar.
   - Design und Aufbau orientiert sich an what_to_do-v1.6.html
 -->
 <html lang="de">
@@ -108,12 +112,16 @@
 
   /* ===== Stimmgerät ===== */
   #tunerDisplay{
-    width:100%;height:150px;background:var(--surface);border-radius:14px;position:relative;overflow:hidden;
+    width:100%;height:170px;background:var(--surface);border-radius:14px;position:relative;overflow:hidden;
     transition:background .45s ease;
   }
-  #needle{position:absolute;bottom:0;left:50%;width:3px;height:60%;background:var(--red);transform-origin:bottom center;transition:transform .06s linear;}
-  #targetHz{font-size:28px;font-weight:700;text-align:center;margin-top:10px;}
-  #centOff{font-size:16px;color:var(--muted);text-align:center;}
+  #needle{position:absolute;bottom:0;left:50%;width:3px;height:60%;background:var(--red);transform-origin:bottom center;transition:transform .06s linear,left .06s linear;}
+  .hzLabel{position:absolute;bottom:6px;font-size:11px;color:var(--muted);transform:translateX(-50%);pointer-events:none;}
+  .noteMarker{position:absolute;top:6px;font-size:12px;font-weight:600;color:var(--ink);opacity:.75;transform:translateX(-50%);pointer-events:none;}
+  #detectedNote{font-size:26px;font-weight:700;text-align:center;margin-top:10px;}
+  #targetHz{font-size:16px;color:var(--muted);text-align:center;}
+  #centOff{font-size:16px;text-align:center;margin-top:2px;}
+  #rangeInfo{font-size:13px;color:var(--muted);text-align:center;margin-top:2px;}
   .stringList{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
   .stringBtn{
     flex:1 1 44px;max-width:80px;padding:10px 4px;border-radius:10px;border:1px solid var(--line);
@@ -129,12 +137,17 @@
   .dot.on{background:var(--red);border-color:var(--red);}
   .dot.accent{background:var(--gold);border-color:var(--gold);}
   #bpmBig{font-size:44px;font-weight:700;text-align:center;line-height:1.1;}
-  #trackList .trackItem{
+  details.seqCard summary{
+    cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;
+  }
+  details.seqCard summary::before{content:"▸";transition:transform .2s ease;}
+  details.seqCard[open] summary::before{transform:rotate(90deg);}
+  .trackItem{
     display:flex;gap:8px;align-items:center;flex-wrap:wrap;
     background:var(--surface);border-radius:10px;padding:10px;margin-bottom:8px;
   }
-  .delBtn{margin-left:auto;}
-
+  .trackItem .orderTag{font-size:12px;font-weight:700;color:var(--muted);min-width:22px;}
+  .trackItem .spacer{margin-left:auto;}
   footer.muted{margin-top:20px;text-align:center;font-size:12px;}
 </style>
 </head>
@@ -166,7 +179,7 @@
         <button class="btn red" id="micBtn">🎙️ Mikrofon starten</button>
         <div class="row" style="margin-left:auto;">
           <label><input type="radio" name="tunerMode" value="strings" checked> Saiten</label>
-          <label><input type="radio" name="tunerMode" value="free"> Frei (ganzer Bereich)</label>
+          <label><input type="radio" name="tunerMode" value="free"> Frei (70–450 Hz)</label>
         </div>
       </div>
     </div>
@@ -175,8 +188,10 @@
       <div id="tunerDisplay">
         <div id="needle"></div>
       </div>
-      <div id="targetHz">–</div>
-      <div id="centOff">Nadel folgt der erkannten Frequenz</div>
+      <div id="detectedNote">–</div>
+      <div id="targetHz">Nadel folgt der erkannten Frequenz</div>
+      <div id="centOff"></div>
+      <div id="rangeInfo">Frequenzbereich (Frei-Modus): 70 – 450 Hz</div>
 
       <div class="stringList" id="stringList"></div>
       <div class="row" style="justify-content:center;margin-top:12px;">
@@ -215,24 +230,27 @@
       </div>
     </div>
 
-    <div class="card">
-      <strong>Spuren / Sequenzen</strong>
-      <p class="muted" style="margin:6px 0 10px;">
-        Lege einzelne Abschnitte fest (BPM + Taktart + Takte-Anzahl). Beim Abspielen
-        laufen sie in dieser Reihenfolge ab.
-      </p>
-      <div id="trackList"></div>
-      <div class="row">
-        <button class="btn small" id="addTrackBtn">+ Abschnitt</button>
-        <button class="btn small red" id="playSeqBtn">▶ Sequenz abspielen</button>
-        <button class="btn small ghost" id="clearTracksBtn">Alle löschen</button>
+    <!-- Ausklappbares Sequenz-Menü -->
+    <details class="card seqCard" id="seqCard">
+      <summary>🥁 Spuren / Sequenzen <span class="muted" id="seqSummaryInfo"></span></summary>
+      <div style="margin-top:12px;">
+        <p class="muted" style="margin-bottom:10px;">
+          Abschnitte mit BPM, Taktart und Takte-Anzahl. Sie werden beim Abspielen
+          nacheinander in dieser Reihenfolge durchlaufen (↑/↓ zum Verschieben, ⧉ zum Duplizieren).
+        </p>
+        <div id="trackList"></div>
+        <div class="row">
+          <button class="btn small" id="addTrackBtn">+ Abschnitt</button>
+          <button class="btn small red" id="playSeqBtn">▶ Sequenz abspielen</button>
+          <button class="btn small ghost" id="clearTracksBtn">Alle löschen</button>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn small ghost" id="exportBtn">⬇ Export</button>
+          <button class="btn small ghost" id="importBtn">⬆ Import</button>
+          <input type="file" id="importFile" accept=".json" style="display:none;">
+        </div>
       </div>
-      <div class="row" style="margin-top:10px;">
-        <button class="btn small ghost" id="exportBtn">⬇ Export</button>
-        <button class="btn small ghost" id="importBtn">⬆ Import</button>
-        <input type="file" id="importFile" accept=".json" style="display:none;">
-      </div>
-    </div>
+    </details>
   </view-section>
 
 </main>
@@ -246,8 +264,8 @@
 <dialog id="helpDlg">
   <div class="dlg-head"><strong>Hilfe</strong><button class="btn small ghost" onclick="this.closest('dialog').close()">Schließen</button></div>
   <div class="dlg-body">
-    <p><strong>Stimmgerät:</strong> Mikrofon starten, Saite wählen (oder „Frei"-Modus). Die rote Nadel zeigt, wie weit der Ton daneben liegt. Mit 🔊 hörst du die Referenzfrequenz der gewählten Saite.</p>
-    <p style="margin-top:8px;"><strong>Metronom:</strong> BPM eintippen oder per 👋 Tap eintakten. Taktart wählen oder eigene (Zähler/Nenner) angeben. Unten kannst du Sequenzen mit mehreren Abschnitten bauen und abspielen. Alles wird lokal gespeichert.</p>
+    <p><strong>Stimmgerät:</strong> Mikrofon starten, Saite wählen (oder „Frei"-Modus). Die erkannte Note und ihre Frequenz werden angezeigt; im Frei-Modus wandert die Nadel über 70–450 Hz, mit Notenskala der Saiten über dem Display. Mit 🔊 hörst du die Referenzfrequenz der gewählten Saite.</p>
+    <p style="margin-top:8px;"><strong>Metronom:</strong> BPM eintippen oder per 👋 Tap eintakten. Taktart wählen oder eigene (Zähler/Nenner) angeben. Im ausklappbaren Sequenz-Menü baust du Abschnitte, verschiebst sie per ↑/↓, duplizierst per ⧉ und spielst sie nacheinander ab. Während eine Sequenz läuft, ist der normale Start-Button pausiert (keine Überlagerung). Alles wird lokal gespeichert.</p>
   </div>
 </dialog>
 
@@ -258,9 +276,9 @@
    1. Konstanten & Defaults
    2. Zustand & Persistenz
    3. UI / Navigation & Theme
-   4. Stimmgerät (Mikrofon, Pitch-Erkennung, Referenzton)
-   5. Metronom (Engine, Tap, Taktarten)
-   6. Spuren-/Sequenz-Editor
+   4. Stimmgerät (Mikrofon, Pitch-Erkennung, Referenzton, Notenanzeige)
+   5. Metronom (Engine, Tap, Taktarten, Überlagerungsschutz)
+   6. Spuren-/Sequenz-Editor (verschieben, duplizieren)
    7. Export/Import
    ===================================================================== */
 
@@ -273,7 +291,8 @@ const STD_STRINGS = [
   {note:"B3", hz:246.94},
   {note:"E4", hz:329.63}
 ];
-const FREE_MIN_HZ = 70, FREE_MAX_HZ = 450;     // relevanter Bereich für Nadel im Frei-Modus
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const FREE_MIN_HZ = 70, FREE_MAX_HZ = 450;
 const STORE_KEY   = "gitToolData";
 const PITCH_BUF   = 2048;
 
@@ -281,10 +300,11 @@ const PITCH_BUF   = 2048;
 let state = {
   a4: 440,
   tunerMode: "strings",
-  activeString: 5,           // Index in STD_STRINGS (Standard: hohe E-Saite)
+  activeString: 5,
   bpm: 120,
   beats: 4, denom: 4,
-  tracks: []                 // {bpm, beats, denom, bars}
+  tracks: [],
+  seqOpen: true               // Merker: Sequenz-Menü ausgeklappt?
 };
 let loaded = false;
 
@@ -294,7 +314,6 @@ function load(){
     if(raw){
       const d = JSON.parse(raw);
       Object.assign(state, d);
-      // Migration: fehlende Felder ergänzen
       if(!Array.isArray(state.tracks)) state.tracks = [];
     }
   }catch(e){ /* Notfalls default */ }
@@ -313,13 +332,13 @@ function showView(id){
   document.querySelectorAll("view-section").forEach(v => v.classList.toggle("active", v.id === id));
   document.querySelectorAll("nav.bottom .navbtn").forEach(b => b.classList.toggle("active", b.dataset.view === id));
   window.scrollTo(0,0);
+  if(id !== "viewMetro" && metroOn) stopAll();  // Ansicht wechseln stoppt die Engine sauber
 }
 document.querySelectorAll("nav.bottom .navbtn").forEach(btn =>
   btn.addEventListener("click", () => showView(btn.dataset.view)));
 document.getElementById("homeBtn").addEventListener("click", () => showView("viewTuner"));
 document.getElementById("helpBtn").addEventListener("click", () => document.getElementById("helpDlg").showModal());
 
-// Theme: OS-Vorgabe als Standard, manuell umschaltbar
 function applyTheme(t){
   if(t === "auto") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   document.documentElement.dataset.theme = t;
@@ -337,26 +356,27 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 /* ===== 4. Stimmgerät ===== */
 let audioCtx=null, micStream=null, analyser=null, pitchRunning=false;
 const needle=document.getElementById("needle");
+const tunerDisplay=document.getElementById("tunerDisplay");
+const detectedNoteEl=document.getElementById("detectedNote");
 const targetHzEl=document.getElementById("targetHz");
 const centOffEl=document.getElementById("centOff");
+const rangeInfoEl=document.getElementById("rangeInfo");
 const stringListEl=document.getElementById("stringList");
 const micWarn=document.getElementById("micWarn");
 
-// Saiten-Buttons aufbauen
 STD_STRINGS.forEach((s,i)=>{
   const b=document.createElement("button");
   b.className="stringBtn"+(i===state.activeString?" active":"");
-  b.innerHTML=`${s.note}<small>${s.hz.toFixed(2)} Hz</small>`;
+  b.innerHTML=`${s.note}<small>${(s.hz*state.a4/440).toFixed(2)} Hz</small>`;
   b.addEventListener("click",()=>{
     state.activeString=i;
     document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
     b.classList.add("active");
-    save(); updateTunerUI();
+    save(); renderStringLabels(); updateTunerUI();
   });
   stringListEl.appendChild(b);
 });
 
-// Kammerton-Input
 const a4Input=document.getElementById("a4Input");
 a4Input.value=state.a4;
 a4Input.addEventListener("change",()=>{
@@ -364,21 +384,20 @@ a4Input.addEventListener("change",()=>{
   if(isNaN(v)) v=440;
   state.a4=Math.min(450,Math.max(430,v));
   a4Input.value=state.a4;
-  save(); updateTunerUI();
+  save(); renderStringLabels(); refreshStringButtons(); updateTunerUI();
 });
 
-// Modi-Umschalter
 document.querySelectorAll('input[name="tunerMode"]').forEach(r=>
   r.addEventListener("change",()=>{
     state.tunerMode=document.querySelector('input[name="tunerMode"]:checked').value;
-    save(); updateTunerUI();
+    save(); renderStringLabels(); updateTunerUI();
   }));
 
 function setActiveModeRadio(){
   document.querySelectorAll('input[name="tunerMode"]').forEach(r=> r.checked = (r.value===state.tunerMode));
 }
 
-// Referenzton (einfacher Oszillator-Blip)
+// Referenzton
 let refOsc=null;
 document.getElementById("refToneBtn").addEventListener("click",()=>{
   if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
@@ -393,57 +412,86 @@ document.getElementById("refToneBtn").addEventListener("click",()=>{
 
 function stringFreq(i){ return STD_STRINGS[i].hz * state.a4/440; }
 
-// Nadel steuern: für Saitenmodus relativ zur Ziel-Saite, Frei-Modus logarithmisch über den ganzen Bereich
+// Notenname aus Frequenz berechnen (Halbtöne relativ zu A4)
+function noteFromHz(hz){
+  const n = Math.round(12*Math.log2(hz/state.a4)) + 57; // A4 = MIDI 69 → Index 57 = C0-basiert
+  const name = NOTE_NAMES[((n%12)+12)%12];
+  const octave = Math.floor(n/12) - 1;
+  const exactHz = state.a4 * Math.pow(2,(n-69)/12);
+  const cents = 1200*Math.log2(hz/exactHz);
+  return {name:name+octave, exactHz, cents};
+}
+
+/* --- Anzeige: Notenskala & Bereich im Display --- */
+function clearDisplayMarkers(){
+  tunerDisplay.querySelectorAll(".noteMarker,.hzLabel").forEach(el=>el.remove());
+}
+// Logarithmische Position einer Frequenz im Frei-Modus (0..1)
+function freePos(hz){
+  const lo=Math.log2(FREE_MIN_HZ), hi=Math.log2(FREE_MAX_HZ);
+  return (Math.log2(Math.min(FREE_MAX_HZ,Math.max(FREE_MIN_HZ,hz)))-lo)/(hi-lo);
+}
+function renderStringLabels(){
+  clearDisplayMarkers();
+  if(state.tunerMode!=="free") return;
+  STD_STRINGS.forEach(s=>{
+    const p=freePos(s.hz*state.a4/440)*100;
+    const nm=document.createElement("div");
+    nm.className="noteMarker"; nm.textContent=s.note; nm.style.left=p+"%";
+    tunerDisplay.appendChild(nm);
+    const hl=document.createElement("div");
+    hl.className="hzLabel"; hl.textContent=s.hz.toFixed(0); hl.style.left=p+"%";
+    tunerDisplay.appendChild(hl);
+  });
+}
+
+// Nadel steuern
 function setNeedle(hz, targetHz, mode){
-  let pct;
   if(mode==="strings"){
-    // ±100 Cent → Nadel von -45° bis +45°
     const cents=1200*Math.log2(hz/targetHz);
     const clamped=Math.max(-100,Math.min(100,cents));
-    pct=(clamped+100)/200;               // 0..1
+    const pct=(clamped+100)/200;
+    needle.style.left="50%";
     needle.style.transform=`rotate(${(pct-0.5)*90}deg)`;
+    needle.style.width="3px"; needle.style.height="60%";
     centOffEl.textContent=`${cents>=0?"+":""}${cents.toFixed(1)} Cent (${cents>5?"zu hoch":cents<-5?"zu tief":"gut ✓"})`;
     needle.style.background = Math.abs(cents)<=5 ? getComputedStyle(document.documentElement).getPropertyValue("--green") : "";
   }else{
-    // Logarithmische Skala über FREE_MIN_HZ..FREE_MAX_HZ
-    const lo=Math.log2(FREE_MIN_HZ), hi=Math.log2(FREE_MAX_HZ);
-    pct=(Math.log2(Math.min(FREE_MAX_HZ,Math.max(FREE_MIN_HZ,hz)))-lo)/(hi-lo);
-    needle.style.left=(pct*100)+"%";
-    needle.style.bottom="0";
+    needle.style.left=(freePos(hz)*100)+"%";
     needle.style.transform="none";
     needle.style.width="3px"; needle.style.height="80%";
-    // nächste Saite anzeigen
-    let best=STD_STRINGS[0],bd=Infinity;
-    STD_STRINGS.forEach(s=>{ const d=Math.abs(1200*Math.log2(hz/s.hz*440/state.a4)); if(d<bd){bd=d;best=s;} });
-    targetHzEl.textContent=`≈ ${best.note}`;
-    centOffEl.textContent=`Erkannt: ${hz.toFixed(1)} Hz · nächstgelegene Saite: ${best.note} (${(best.hz*state.a4/440).toFixed(2)} Hz)`;
     needle.style.background="";
   }
 }
 
 function updateTunerUI(){
-  const mode=state.tunerMode;
   setActiveModeRadio();
-  if(mode==="strings"){
+  document.getElementById("rangeInfo").textContent =
+    state.tunerMode==="free"
+      ? "Frequenzbereich: 70 – 450 Hz (Skala logarithmisch)"
+      : `Aktuelle Saite: ${STD_STRINGS[state.activeString].note} · Bereich ±100 Cent um ${(stringFreq(state.activeString)).toFixed(2)} Hz`;
+  if(state.tunerMode==="strings"){
     const f=stringFreq(state.activeString);
-    targetHzEl.textContent=`${STD_STRINGS[state.activeString].note} · ${f.toFixed(2)} Hz`;
+    detectedNoteEl.textContent=STD_STRINGS[state.activeString].note;
+    targetHzEl.textContent=`Ziel: ${f.toFixed(2)} Hz`;
     centOffEl.textContent="Nadel zeigt Abweichung ±100 Cent";
     needle.style.left="50%"; needle.style.transform="rotate(0deg)";
     needle.style.width="3px"; needle.style.height="60%";
   }else{
-    targetHzEl.textContent="Freier Modus";
-    centOffEl.textContent="Nadel wandert über 70–450 Hz, nächste Saite wird angezeigt";
+    detectedNoteEl.textContent="Freier Modus";
+    targetHzEl.textContent="Erkenne Ton …";
+    centOffEl.textContent="";
   }
 }
 updateTunerUI();
+renderStringLabels();
 
-// Pitch-Erkennung per Autokorrelation (ACF mit Normalisierung)
 function detectPitch(buf, sampleRate){
   const SIZE=buf.length;
   let rms=0;
-  for(let i=0;i<SIZE;i++){ const v=buf[i]; rms+=v*v; }
+  for(let i=0;i<SIZE;i++){ rms+=buf[i]*buf[i]; }
   rms=Math.sqrt(rms/SIZE);
-  if(rms<0.01) return -1;                       // zu leise
+  if(rms<0.01) return -1;
   let r1=0,r2=SIZE-1,thr=0.2;
   for(let i=0;i<SIZE/2;i++) if(Math.abs(buf[i])<thr){ r1=i; break; }
   for(let i=1;i<SIZE/2;i++) if(Math.abs(buf[SIZE-i])<thr){ r2=SIZE-i; break; }
@@ -456,7 +504,6 @@ function detectPitch(buf, sampleRate){
   for(let i=d;i<N;i++) if(c[i]>maxval){ maxval=c[i]; maxpos=i; }
   if(maxpos<=0) return -1;
   let T0=maxpos;
-  // parabolische Interpolation
   const x1=c[T0-1]||0, x2=c[T0], x3=c[T0+1]||0;
   const a=(x1+x3-2*x2)/2, bb=(x3-x1)/2;
   if(a) T0=T0-bb/(2*a);
@@ -494,21 +541,27 @@ function loopPitch(){
   analyser.getFloatTimeDomainData(buf);
   const hz=detectPitch(buf,audioCtx.sampleRate);
   if(hz>0){
+    const info=noteFromHz(hz);
+    detectedNoteEl.textContent=`${info.name} · ${hz.toFixed(1)} Hz`;
     if(state.tunerMode==="strings"){
       setNeedle(hz,stringFreq(state.activeString),"strings");
-      // zusätzlich erkannte Frequenz anzeigen
-      targetHzEl.textContent=`${STD_STRINGS[state.activeString].note} · ${stringFreq(state.activeString).toFixed(2)} Hz (erkannt ${hz.toFixed(1)} Hz)`;
+      targetHzEl.textContent=`Ziel: ${STD_STRINGS[state.activeString].note} · ${stringFreq(state.activeString).toFixed(2)} Hz`;
     }else{
       setNeedle(hz,null,"free");
+      // nächste Saite als Zusatzinfo
+      let best=STD_STRINGS[0],bd=Infinity;
+      STD_STRINGS.forEach(s=>{ const dd=Math.abs(1200*Math.log2(hz/(s.hz*state.a4/440))); if(dd<bd){bd=dd;best=s;} });
+      targetHzEl.textContent=`Nächstgelegene Saite: ${best.note} (${(best.hz*state.a4/440).toFixed(2)} Hz)`;
     }
   }
   requestAnimationFrame(loopPitch);
 }
 
-/* ===== 5. Metronom ===== */
-let metroOn=false, nextBeatTime=0, beatCount=0, schedTimer=null;
-let seqMode=false, seqIdx=0, seqBeatInBar=0, seqBarInTrack=0;
+/* ===== 5. Metronom (nur EINE Engine gleichzeitig!) ===== */
+let engineTimer=null, nextBeatTime=0, beatCount=0;
+let engineMode=null;   // null | "simple" | "sequence"
 const startStopBtn=document.getElementById("startStopBtn");
+const playSeqBtn=document.getElementById("playSeqBtn");
 const bpmBig=document.getElementById("bpmBig");
 const bpmInput=document.getElementById("bpmInput");
 const tsSelect=document.getElementById("tsSelect");
@@ -517,18 +570,25 @@ const tsCustomDen=document.getElementById("tsCustomDen");
 const beatDots=document.getElementById("beatDots");
 const metroStatus=document.getElementById("metroStatus");
 
+function ensureCtx(){
+  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  audioCtx.resume();
+}
+
 bpmInput.value=state.bpm;
 bpmInput.addEventListener("change",()=>{
   let v=parseInt(bpmInput.value,10);
   if(isNaN(v)) v=120;
   state.bpm=Math.min(300,Math.max(20,v));
-  bpmInput.value=state.bpm; bpmBig.innerHTML=`${state.bpm} <span class="muted" style="font-size:16px;">BPM</span>`;
+  bpmInput.value=state.bpm; syncBpmDisplay();
   save();
 });
-bpmInput.addEventListener("input",()=>{ // live-Anzeige beim Tippen
+bpmInput.addEventListener("input",()=>{
   let v=parseInt(bpmInput.value,10);
   if(!isNaN(v)&&v>=20&&v<=300) bpmBig.innerHTML=`${v} <span class="muted" style="font-size:16px;">BPM</span>`;
 });
+function syncBpmDisplay(){ bpmBig.innerHTML=`${state.bpm} <span class="muted" style="font-size:16px;">BPM</span>`; }
+syncBpmDisplay();
 
 tsSelect.addEventListener("change",()=>{
   const custom = tsSelect.value==="custom";
@@ -545,17 +605,13 @@ tsSelect.addEventListener("change",()=>{
 });
 tsCustomBeats.addEventListener("change",()=>{ state.beats=Math.min(16,Math.max(2,parseInt(tsCustomBeats.value,10)||7)); save(); buildBeatDots(); });
 tsCustomDen.addEventListener("change",()=>{ state.denom=Math.min(32,Math.max(2,parseInt(tsCustomDen.value,10)||8)); save(); });
-// Auswahl im Select restaurieren
 (function restoreTS(){
   const val=`${state.beats}/${state.denom}`;
   const opt=[...tsSelect.options].find(o=>o.value===val);
   if(opt) tsSelect.value=val; else { tsSelect.value="custom"; tsCustomBeats.value=state.beats; tsCustomDen.value=state.denom; tsCustomBeats.style.display=""; tsCustomDen.style.display=""; }
 })();
 
-function beatSeconds(beats,denom,bpm){
-  // Beat-Dauer: viertel-Referenz; Nenner 8 → halbe Viertel-Dauer usw.
-  return (60/bpm) * (4/denom);
-}
+function beatSeconds(beats,denom,bpm){ return (60/bpm)*(4/denom); }
 
 function buildBeatDots(){
   beatDots.innerHTML="";
@@ -567,11 +623,11 @@ function buildBeatDots(){
 }
 buildBeatDots();
 
-// Tap-Tempo: Median der letzten Intervalle
+/* Tap-Tempo */
 let taps=[];
 document.getElementById("tapBtn").addEventListener("click",()=>{
   const now=performance.now();
-  if(taps.length && now-taps[taps.length-1] > 2500) taps=[];   // Reset nach Pause
+  if(taps.length && now-taps[taps.length-1] > 2500) taps=[];
   taps.push(now);
   if(taps.length>8) taps.shift();
   if(taps.length>=2){
@@ -581,14 +637,13 @@ document.getElementById("tapBtn").addEventListener("click",()=>{
     const med=iv[Math.floor(iv.length/2)];
     let bpm=Math.round(60000/med);
     bpm=Math.min(300,Math.max(20,bpm));
-    state.bpm=bpm; bpmInput.value=bpm;
-    bpmBig.innerHTML=`${bpm} <span class="muted" style="font-size:16px;">BPM</span>`;
+    state.bpm=bpm; bpmInput.value=bpm; syncBpmDisplay();
     save();
     metroStatus.textContent=`Tap: ${bpm} BPM`;
   }
 });
 
-// Ton-Erzeugung
+/* Klick-Sound */
 function click(time,accent){
   const o=audioCtx.createOscillator(), g=audioCtx.createGain();
   o.frequency.value = accent ? 1600 : 800;
@@ -598,45 +653,114 @@ function click(time,accent){
   o.start(time); o.stop(time+0.07);
 }
 
-// Scheduling-Loop (Web-Audio-Clock, Vorlauf 0.1 s)
-function scheduler(){
-  const lookahead=0.1;
-  while(nextBeatTime < audioCtx.currentTime + lookahead){
-    scheduleBeat(nextBeatTime);
-    nextBeatTime += beatSeconds(state.beats,state.denom,state.bpm);
-  }
-}
-function scheduleBeat(t){
-  const accent = beatCount % state.beats === 0;
-  click(t, accent);
-  // Visuals leicht verzögert passend zur Audio-Zeit
-  const delayMs=(t-audioCtx.currentTime)*1000;
+/* Visualisierung passend zur Audio-Zeit */
+function flashBeat(t,idx){
+  const delayMs=Math.max(0,(t-audioCtx.currentTime)*1000);
   setTimeout(()=>{
     const dots=beatDots.children;
-    for(let i=0;i<dots.length;i++) dots[i].classList.toggle("on", i===(beatCount%state.beats));
-    metroStatus.textContent=`Schlag ${beatCount%state.beats+1} / ${state.beats}`;
-    beatCount++;
-  },Math.max(0,delayMs));
+    for(let i=0;i<dots.length;i++) dots[i].classList.toggle("on", i===idx);
+  },delayMs);
 }
 
-function startMetro(){
-  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  audioCtx.resume();
-  beatCount=0;
-  nextBeatTime=audioCtx.currentTime+0.1;
-  schedTimer=setInterval(scheduler,25);
-  metroOn=true;
-  startStopBtn.textContent="⏹ Stop";
-}
-function stopMetro(){
-  clearInterval(schedTimer); metroOn=false;
+/* Zentrale Steuerung: immer nur eine Engine aktiv */
+function stopAll(){
+  if(engineTimer){ clearInterval(engineTimer); engineTimer=null; }
+  engineMode=null;
   startStopBtn.textContent="▶ Start";
+  playSeqBtn.textContent="▶ Sequenz abspielen";
+  startStopBtn.disabled=false;
+  playSeqBtn.disabled=false;
   [...beatDots.children].forEach(d=>d.classList.remove("on"));
   metroStatus.textContent="Bereit";
 }
-startStopBtn.addEventListener("click",()=> metroOn?stopMetro():startMetro());
 
-/* ===== 6. Spuren-/Sequenz-Editor ===== */
+function scheduleBeatSimple(t){
+  const idx=beatCount % state.beats;
+  click(t, idx===0);
+  flashBeat(t,idx);
+  metroStatus.textContent=`Schlag ${idx+1} / ${state.beats}`;
+  beatCount++;
+}
+
+/* Einfaches Metronom */
+startStopBtn.addEventListener("click",()=>{
+  if(engineMode==="simple"){ stopAll(); return; }
+  if(engineMode==="sequence"){ stopAll(); }        // Überlagerung ausschließen
+  ensureCtx();
+  engineMode="simple";
+  playSeqBtn.disabled=true;                        // Sequenz-Start während Lauf sperren
+  startStopBtn.textContent="⏹ Stop";
+  beatCount=0;
+  nextBeatTime=audioCtx.currentTime+0.1;
+  engineTimer=setInterval(()=>{
+    while(nextBeatTime < audioCtx.currentTime + 0.1){
+      scheduleBeatSimple(nextBeatTime);
+      nextBeatTime += beatSeconds(state.beats,state.denom,state.bpm);
+    }
+  },25);
+});
+
+/* Sequenz-Wiedergabe */
+let seqIdx=0, seqBeatInBar=0, seqBarInTrack=0;
+function applyTrackToUI(tr, running){
+  state.bpm=tr.bpm; state.beats=tr.beats; state.denom=tr.denom;
+  bpmInput.value=tr.bpm; syncBpmDisplay();
+  const val=`${tr.beats}/${tr.denom}`;
+  if([...tsSelect.options].some(o=>o.value===val)) tsSelect.value=val;
+  else { tsSelect.value="custom"; tsCustomBeats.value=tr.beats; tsCustomDen.value=tr.denom; tsCustomBeats.style.display=""; tsCustomDen.style.display=""; }
+  buildBeatDots();
+  if(running) metroStatus.textContent=`Abschnitt ${seqIdx+1}/${state.tracks.length}: ${tr.bpm} BPM, ${tr.beats}/${tr.denom}, Takt ${seqBarInTrack+1}/${tr.bars}`;
+}
+function startSeqTrack(first){
+  const tr=state.tracks[seqIdx];
+  applyTrackToUI(tr,true);
+  beatCount=0; seqBeatInBar=0;
+  if(first) nextBeatTime=audioCtx.currentTime+0.1;
+  clearInterval(engineTimer);
+  engineTimer=setInterval(seqScheduler,25);
+}
+function seqScheduler(){
+  const tr=state.tracks[seqIdx];
+  const beatsPerBar=tr.beats;
+  while(nextBeatTime < audioCtx.currentTime + 0.1){
+    const idx=seqBeatInBar;
+    click(nextBeatTime, idx===0);
+    flashBeat(nextBeatTime,idx);
+    nextBeatTime += beatSeconds(tr.beats,tr.denom,tr.bpm);
+    seqBeatInBar++;
+    if(seqBeatInBar>=beatsPerBar){
+      seqBeatInBar=0; seqBarInTrack++;
+      if(seqBarInTrack>=tr.bars){
+        seqBarInTrack=0; seqIdx++;
+        if(seqIdx>=state.tracks.length){ stopAll(); return; }
+        startSeqTrack(false);
+        return;
+      }
+    }
+  }
+}
+playSeqBtn.addEventListener("click",()=>{
+  if(engineMode==="sequence"){ stopAll(); return; }
+  if(engineMode==="simple"){ stopAll(); }          // Überlagerung ausschließen
+  if(!state.tracks.length){ alert("Bitte zuerst mindestens einen Abschnitt anlegen."); return; }
+  ensureCtx();
+  engineMode="sequence";
+  startStopBtn.disabled=true;                      // Normal-Start während Sequenz sperren
+  playSeqBtn.textContent="⏹ Sequenz stoppen";
+  seqIdx=0; seqBarInTrack=0;
+  startSeqTrack(true);
+});
+
+/* Sequenz-Menü offen/zu merken */
+const seqCard=document.getElementById("seqCard");
+seqCard.open = !!state.seqOpen;
+seqCard.addEventListener("toggle",()=>{ state.seqOpen=seqCard.open; save(); updateSeqSummary(); });
+function updateSeqSummary(){
+  document.getElementById("seqSummaryInfo").textContent =
+    state.tracks.length ? `(${state.tracks.length} Abschnitt${state.tracks.length>1?"e":""})` : "(leer)";
+}
+
+/* ===== 6. Spuren-/Sequenz-Editor (verschieben & duplizieren) ===== */
 const trackListEl=document.getElementById("trackList");
 
 function renderTracks(){
@@ -645,18 +769,31 @@ function renderTracks(){
     const div=document.createElement("div");
     div.className="trackItem";
     div.innerHTML=`
+      <span class="orderTag">${i+1}.</span>
       <label>BPM <input type="number" class="trBpm" value="${tr.bpm}" min="20" max="300" style="width:65px;"></label>
       <label>Zähler <input type="number" class="trBeats" value="${tr.beats}" min="2" max="16" style="width:55px;"></label>
       <label>Nenner <input type="number" class="trDen" value="${tr.denom}" min="2" max="32" style="width:55px;"></label>
       <label>Takte <input type="number" class="trBars" value="${tr.bars}" min="1" max="128" style="width:55px;"></label>
-      <button class="btn small ghost delBtn" data-i="${i}">🗑</button>`;
+      <span class="spacer"></span>
+      <button class="btn small ghost" data-act="up" data-i="${i}" title="Nach oben" ${i===0?"disabled":""}>↑</button>
+      <button class="btn small ghost" data-act="down" data-i="${i}" title="Nach unten" ${i===state.tracks.length-1?"disabled":""}>↓</button>
+      <button class="btn small ghost" data-act="dup" data-i="${i}" title="Duplizieren (mehrfach klickbar)">⧉</button>
+      <button class="btn small ghost" data-act="del" data-i="${i}" title="Löschen">🗑</button>`;
     div.querySelector(".trBpm").addEventListener("change",e=>{ tr.bpm=Math.min(300,Math.max(20,parseInt(e.target.value,10)||120)); save(); });
     div.querySelector(".trBeats").addEventListener("change",e=>{ tr.beats=Math.min(16,Math.max(2,parseInt(e.target.value,10)||4)); save(); });
     div.querySelector(".trDen").addEventListener("change",e=>{ tr.denom=Math.min(32,Math.max(2,parseInt(e.target.value,10)||4)); save(); });
     div.querySelector(".trBars").addEventListener("change",e=>{ tr.bars=Math.min(128,Math.max(1,parseInt(e.target.value,10)||4)); save(); });
-    div.querySelector(".delBtn").addEventListener("click",()=>{ state.tracks.splice(i,1); save(); renderTracks(); });
+    div.querySelectorAll("button[data-act]").forEach(btn=>btn.addEventListener("click",()=>{
+      const j=+btn.dataset.i;
+      if(btn.dataset.act==="up" && j>0){ [state.tracks[j-1],state.tracks[j]]=[state.tracks[j],state.tracks[j-1]]; }
+      if(btn.dataset.act==="down" && j<state.tracks.length-1){ [state.tracks[j+1],state.tracks[j]]=[state.tracks[j],state.tracks[j+1]]; }
+      if(btn.dataset.act==="dup"){ state.tracks.splice(j+1,0,{...state.tracks[j]}); }  // mehrfach kopierbar
+      if(btn.dataset.act==="del"){ state.tracks.splice(j,1); }
+      save(); renderTracks(); updateSeqSummary();
+    }));
     trackListEl.appendChild(div);
   });
+  updateSeqSummary();
 }
 document.getElementById("addTrackBtn").addEventListener("click",()=>{
   state.tracks.push({bpm:state.bpm,beats:state.beats,denom:state.denom,bars:4});
@@ -666,50 +803,6 @@ document.getElementById("clearTracksBtn").addEventListener("click",()=>{
   if(confirm("Wirklich alle Abschnitte löschen?")){ state.tracks=[]; save(); renderTracks(); }
 });
 renderTracks();
-
-// Sequenz-Wiedergabe: läuft Abschnitt für Abschnitt ab
-document.getElementById("playSeqBtn").addEventListener("click",function(){
-  if(seqMode){ stopMetro(); seqMode=false; this.textContent="▶ Sequenz abspielen"; return; }
-  if(!state.tracks.length){ alert("Bitte zuerst mindestens einen Abschnitt anlegen."); return; }
-  seqMode=true; seqIdx=0; seqBarInTrack=0; seqBeatInBar=0;
-  this.textContent="⏹ Sequenz stoppen";
-  startStopBtn.textContent="⏹ Stop"; metroOn=true;
-  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  audioCtx.resume();
-  startSeqTrack();
-});
-function startSeqTrack(){
-  const tr=state.tracks[seqIdx];
-  state.bpm=tr.bpm; state.beats=tr.beats; state.denom=tr.denom;
-  bpmInput.value=tr.bpm; bpmBig.innerHTML=`${tr.bpm} <span class="muted" style="font-size:16px;">BPM</span>`;
-  tsSelect.value=`${tr.beats}/${tr.denom}`;
-  if(![...tsSelect.options].some(o=>o.value===tsSelect.value)){ tsSelect.value="custom"; tsCustomBeats.value=tr.beats; tsCustomDen.value=tr.denom; tsCustomBeats.style.display=""; tsCustomDen.style.display=""; }
-  buildBeatDots();
-  metroStatus.textContent=`Abschnitt ${seqIdx+1}/${state.tracks.length}: ${tr.bpm} BPM, ${tr.beats}/${tr.denom}`;
-  beatCount=0; seqBeatInBar=0;
-  nextBeatTime=audioCtx.currentTime+0.1;
-  clearInterval(schedTimer);
-  schedTimer=setInterval(seqScheduler,25);
-}
-function seqScheduler(){
-  const tr=state.tracks[seqIdx];
-  const beatsPerBar=tr.beats;
-  const barLen=beatSeconds(tr.beats,tr.denom,tr.bpm)*beatsPerBar;
-  while(nextBeatTime < audioCtx.currentTime+0.1){
-    scheduleBeat(nextBeatTime);
-    nextBeatTime+=beatSeconds(tr.beats,tr.denom,tr.bpm);
-    seqBeatInBar++;
-    if(seqBeatInBar>=beatsPerBar){
-      seqBeatInBar=0; seqBarInTrack++;
-      if(seqBarInTrack>=tr.bars){
-        seqBarInTrack=0; seqIdx++;
-        if(seqIdx>=state.tracks.length){ stopMetro(); seqMode=false; document.getElementById("playSeqBtn").textContent="▶ Sequenz abspielen"; return; }
-        startSeqTrack();  // wechselt sofort zu nächstem Abschnitt
-        return;
-      }
-    }
-  }
-}
 
 /* ===== 7. Export/Import ===== */
 document.getElementById("exportBtn").addEventListener("click",()=>{
@@ -731,12 +824,21 @@ document.getElementById("importFile").addEventListener("change",e=>{
       Object.assign(state,d);
       if(!Array.isArray(state.tracks)) state.tracks=[];
       save();
-      a4Input.value=state.a4; bpmInput.value=state.bpm; renderTracks(); updateTunerUI(); buildBeatDots();
+      a4Input.value=state.a4; bpmInput.value=state.bpm; syncBpmDisplay();
+      renderStringLabels(); refreshStringButtons(); updateTunerUI(); buildBeatDots();
+      renderTracks(); seqCard.open = !!state.seqOpen;
       alert("Import erfolgreich.");
     }catch(err){ alert("Import fehlgeschlagen: ungültige Datei."); }
   };
   r.readAsText(f);
 });
+
+function refreshStringButtons(){
+  document.querySelectorAll(".stringBtn").forEach((b,i)=>{
+    b.innerHTML=`${STD_STRINGS[i].note}<small>${(STD_STRINGS[i].hz*state.a4/440).toFixed(2)} Hz</small>`;
+    b.classList.toggle("active", i===state.activeString);
+  });
+}
 
 load();
 save();
