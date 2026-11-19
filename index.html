@@ -124,6 +124,12 @@
   }
   #needle{position:absolute;bottom:0;left:50%;width:3px;height:60%;background:var(--red);transform-origin:bottom center;transition:transform .06s linear,left .06s linear;}
   .hzLabel{position:absolute;bottom:6px;font-size:11px;color:var(--muted);transform:translateX(-50%);pointer-events:none;}
+  .gridLine{position:absolute;top:0;bottom:22px;width:1px;background:var(--line);opacity:.55;transform:translateX(-50%);pointer-events:none;}
+  .liveFreq{
+    position:absolute;top:8px;transform:translateX(-50%);
+    background:var(--red);color:#fff;border-radius:8px;
+    padding:2px 8px;font-size:13px;font-weight:600;pointer-events:none;white-space:nowrap;
+  } 
   .noteMarker{position:absolute;top:6px;font-size:12px;font-weight:600;color:var(--ink);opacity:.75;transform:translateX(-50%);pointer-events:none;}
   #detectedNote{font-size:26px;font-weight:700;text-align:center;margin-top:10px;}
   #targetHz{font-size:16px;color:var(--muted);text-align:center;}
@@ -155,7 +161,7 @@
     touch-action:pan-y;
   }
   .trackItem.dragging{opacity:.5;outline:2px dashed var(--red);}
-  .trackItem .orderTag{font-size:12px;font-weight:700;color:var(--muted);min-width:22px;cursor:grab;}
+  .trackItem .orderTag{font-size:12px;font-weight:700;color:var(--muted);min-width:22px;cursor:grab;touch-action:none;}
   .trackItem .tsBadge{
     font-weight:700;font-size:14px;background:var(--panel);border:1px solid var(--line);
     border-radius:8px;padding:4px 8px;cursor:pointer;
@@ -440,7 +446,7 @@ a4Input.addEventListener("change",()=>{
 document.querySelectorAll('input[name="tunerMode"]').forEach(r=>
   r.addEventListener("change",()=>{
     state.tunerMode=document.querySelector('input[name="tunerMode"]:checked').value;
-    save(); renderStringLabels(); updateTunerUI();
+    save(); renderGrid(); updateTunerUI();
   }));
 function setActiveModeRadio(){
   document.querySelectorAll('input[name="tunerMode"]').forEach(r=> r.checked = (r.value===state.tunerMode));
@@ -467,19 +473,30 @@ function freePos(hz){
   const lo=Math.log2(FREE_MIN_HZ), hi=Math.log2(FREE_MAX_HZ);
   return (Math.log2(Math.min(FREE_MAX_HZ,Math.max(FREE_MIN_HZ,hz)))-lo)/(hi-lo);
 }
-function renderStringLabels(){
-  clearDisplayMarkers();
-  if(state.tunerMode!=="free") return;
+function clearDisplayMarkers(){
+  tunerDisplay.querySelectorAll(".noteMarker,.hzLabel,.gridLine,.liveFreq").forEach(el=>el.remove());
+}
+// Dezentes Raster: vertikale Linien bei jeder Saiten-Note (beide Modi nutzbar)
+function renderGrid(){
   STD_STRINGS.forEach(s=>{
     const f=s.hz*state.a4/440;
-    const p=freePos(f)*100;
-    const nm=document.createElement("div");
-    nm.className="noteMarker"; nm.textContent=s.note; nm.style.left=p+"%";
-    tunerDisplay.appendChild(nm);
-    const hl=document.createElement("div");
-    hl.className="hzLabel"; hl.textContent=f.toFixed(0); hl.style.left=p+"%";
-    tunerDisplay.appendChild(hl);
+    if(state.tunerMode==="free"){
+      const gl=document.createElement("div");
+      gl.className="gridLine"; gl.style.left=(freePos(f)*100)+"%";
+      tunerDisplay.appendChild(gl);
+    }
   });
+}
+// Live-Frequenz-Label innerhalb der Grafik
+function renderLiveFreq(hz){
+  tunerDisplay.querySelectorAll(".liveFreq").forEach(el=>el.remove());
+  if(!hz) return;
+  const lab=document.createElement("div");
+  lab.className="liveFreq"; lab.textContent=hz.toFixed(1)+" Hz";
+  lab.style.left = state.tunerMode==="free"
+    ? (freePos(hz)*100)+"%"
+    : "50%";
+  tunerDisplay.appendChild(lab);
 }
 
 // Nadel steuern
@@ -517,7 +534,8 @@ function updateTunerUI(){
     centOffEl.textContent="";
     rangeInfoEl.textContent="Frequenzbereich: 70 – 450 Hz (Skala logarithmisch)";
   }
-  renderStringLabels();
+  renderGrid();
+  renderLiveFreq(null);
 }
 updateTunerUI();
 
@@ -576,6 +594,7 @@ function loopPitch(){
   analyser.getFloatTimeDomainData(buf);
   const hz=detectPitch(buf,audioCtx.sampleRate);
   if(hz>0){
+    renderLiveFreq(hz);
     const info=noteFromHz(hz);
     const r=noteRange(info.midi);
     detectedNoteEl.textContent=`${info.name} · ${hz.toFixed(1)} Hz`;
@@ -588,7 +607,7 @@ function loopPitch(){
       STD_STRINGS.forEach(s=>{ const dd=Math.abs(1200*Math.log2(hz/(s.hz*state.a4/440))); if(dd<bd){bd=dd;best=s;} });
       targetHzEl.textContent=`Nächstgelegene Saite: ${best.note} (${(best.hz*state.a4/440).toFixed(2)} Hz)`;
     }
-    centOffEl.textContent=`${info.cents>=0?"+":""}${info.cents.toFixed(1)} Cent · Bereich: ${r.lo.toFixed(1)} – ${r.hi.toFixed(1)} Hz`;
+    centOffEl.textContent=`${info.cents>=0?"+":""}${info.cents.toFixed(1)} Cent`;
   }
   requestAnimationFrame(loopPitch);
 }
@@ -836,6 +855,7 @@ function renderTracks(){
     /* --- Halten & Ziehen --- */
     const handle = div.querySelector(".orderTag");
     handle.addEventListener("pointerdown", ev=>{
+      ev.preventDefault();
       if(engineMode) return;                     // während Wiedergabe nicht verschieben
       handle.setPointerCapture(ev.pointerId);
       startY=ev.clientY; curY=startY;
