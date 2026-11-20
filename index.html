@@ -453,16 +453,34 @@ function setActiveModeRadio(){
 }
 
 // Referenzton
-let refOsc=null;
-document.getElementById("refToneBtn").addEventListener("click",()=>{
+let refOsc=null, refGain=null;
+const refBtn=document.getElementById("refToneBtn");
+
+function stopRefTone(){
+  if(!refOsc) return;
+  const t=audioCtx.currentTime;
+  refGain.gain.cancelScheduledValues(t);
+  refGain.gain.setValueAtTime(refGain.gain.value,t);
+  refGain.gain.linearRampToValueAtTime(0.0001,t+0.05);   // weich ausblenden
+  refOsc.stop(t+0.06);
+  refOsc=null; refGain=null;
+}
+
+refBtn.addEventListener("click",()=>{
   if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  if(refOsc){ refOsc.stop(); refOsc=null; return; }
+  if(refOsc){ stopRefTone(); return; }
   const o=audioCtx.createOscillator(), g=audioCtx.createGain();
-  o.frequency.value=stringFreq(state.activeString);
-  o.type="sine"; g.gain.value=0.25;
+  const f=stringFreq(state.activeString);
+  // Lautstärke-Ausgleich: Tieftöne bekommen mehr Gain (gleiche wahrgenommene Lautstärke)
+  const vol=Math.min(0.5, 0.25*Math.pow(150/f,0.4));
+  const t=audioCtx.currentTime;
+  o.frequency.value=f; o.type="sine";
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(vol,t+0.02);            // weich einblenden
   o.connect(g).connect(audioCtx.destination);
-  o.start(); refOsc=o;
-  setTimeout(()=>{ if(refOsc===o){ o.stop(); refOsc=null; } },2000);
+  o.start(t);
+  refOsc=o; refGain=g;
+  setTimeout(()=>{ if(refOsc===o) stopRefTone(); },2000);
 });
 
 /* --- Anzeige: Notenskala im Frei-Modus --- */
@@ -481,9 +499,16 @@ function renderGrid(){
   STD_STRINGS.forEach(s=>{
     const f=s.hz*state.a4/440;
     if(state.tunerMode==="free"){
+      const p=(freePos(f)*100)+"%";
       const gl=document.createElement("div");
-      gl.className="gridLine"; gl.style.left=(freePos(f)*100)+"%";
+      gl.className="gridLine"; gl.style.left=p;
       tunerDisplay.appendChild(gl);
+      const nm=document.createElement("div");
+      nm.className="noteMarker"; nm.textContent=s.note; nm.style.left=p;
+      tunerDisplay.appendChild(nm);
+      const hl=document.createElement("div");
+      hl.className="hzLabel"; hl.textContent=f.toFixed(0); hl.style.left=p;
+      tunerDisplay.appendChild(hl);
     }
   });
 }
