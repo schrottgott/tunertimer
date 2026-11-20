@@ -215,7 +215,28 @@
       <div id="targetHz">Nadel folgt der erkannten Frequenz</div>
       <div id="centOff"></div>
       <div id="rangeInfo">Frequenzbereich (Frei-Modus): 70 – 450 Hz</div>
-
+      <div class="row" style="justify-content:center;margin-top:8px;">
+        <button class="btn small ghost" id="autoBtn">🔄 Automatisch</button>
+        <details class="card seqCard" id="customNoteCard" style="flex:1;min-width:220px;background:transparent;box-shadow:none;padding:0;">
+          <summary style="font-weight:400;">📝 Eigener Ton</summary>
+          <div class="row" style="margin-top:8px;">
+            <label>Name <input type="text" id="customName" placeholder="z. B. C3" style="width:70px;"></label>
+            <label>Hz <input type="number" id="customHz" min="60" max="500" step="0.01" style="width:80px;"></label>
+            <button class="btn small" id="customApply">Übernehmen</button>
+          </div>
+        </details>
+      </div>
+      <div class="row" style="justify-content:center;margin-top:8px;">
+        <button class="btn small ghost" id="autoBtn">🔄 Automatisch</button>
+        <details id="customNoteCard">
+          <summary class="muted" style="cursor:pointer;">📝 Eigener Ton</summary>
+          <div class="row" style="margin-top:8px;">
+            <label>Name <input type="text" id="customName" placeholder="z. B. C3" style="width:70px;"></label>
+            <label>Hz <input type="number" id="customHz" min="60" max="500" step="0.01" style="width:80px;"></label>
+            <button class="btn small" id="customApply">Übernehmen</button>
+          </div>
+        </details>
+      </div>
       <div class="stringList" id="stringList"></div>
       <div class="row" style="justify-content:center;margin-top:12px;">
         <button class="btn small ghost" id="refToneBtn">🔊 Referenzton</button>
@@ -320,6 +341,7 @@ const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const FREE_MIN_HZ = 70, FREE_MAX_HZ = 450;
 const STORE_KEY   = "gitToolData";
 const PITCH_BUF   = 2048;
+let lastHz = null;
 const HOLD_MS     = 350;   // Haltezeit, bevor Ziehen aktiv wird
 
 /* ===== 2. Zustand & Persistenz (früh laden!) ===== */
@@ -330,7 +352,9 @@ let state = {
   bpm: 120,
   beats: 4, denom: 4,
   tracks: [],
-  seqOpen: true
+  seqOpen: true,
+  target: "auto",
+  customNote: { hz: null, label: "" }
 };
 let loaded = false;
 
@@ -398,6 +422,12 @@ const micWarn=document.getElementById("micWarn");
 
 function stringFreq(i){ return STD_STRINGS[i].hz * state.a4/440; }
 
+function targetFreq(){
+  if(state.target==="custom" && state.customNote.hz) return state.customNote.hz;
+  if(typeof state.target==="string" && state.target.startsWith("string")) return stringFreq(+state.target.slice(6));
+  return null;
+}
+  
 // Notenname + exakte Frequenz + Cent-Abweichung aus Frequenz
 function noteFromHz(hz){
   const n = Math.round(12*Math.log2(hz/state.a4)) + 57;
@@ -426,8 +456,10 @@ STD_STRINGS.forEach((s,i)=>{
   b.className="stringBtn";
   b.addEventListener("click",()=>{
     state.activeString=i;
+    state.target="string"+i;
     refreshStringButtons();
     save(); updateTunerUI();
+    setNeedleRedraw();
   });
   stringListEl.appendChild(b);
 });
@@ -442,12 +474,29 @@ a4Input.addEventListener("change",()=>{
   a4Input.value=state.a4;
   save(); refreshStringButtons(); updateTunerUI();
 });
-
+function setNeedleRedraw(){
+  if(lastHz){
+    const tf = targetFreq() || null;
+    if(state.tunerMode==="strings" && tf){
+      setNeedle(lastHz, tf, "strings");
+    }else if(state.tunerMode==="free"){
+      setNeedle(lastHz, null, "free");
+      renderLiveFreq(lastHz);
+    }
+  }else{
+    renderLiveFreq(null);
+  }
+}
 document.querySelectorAll('input[name="tunerMode"]').forEach(r=>
   r.addEventListener("change",()=>{
     state.tunerMode=document.querySelector('input[name="tunerMode"]:checked').value;
-    save(); renderGrid(); updateTunerUI();
+    save();
+    updateTarget();            // Ziel für neuen Modus bereitstellen
+    renderGrid();              // Nadel & Marker sofort neu aufbauen
+    renderLiveFreq(lastHz);    // Label neu positionieren (oder null)
+    updateTunerUI();
   }));
+  
 function setActiveModeRadio(){
   document.querySelectorAll('input[name="tunerMode"]').forEach(r=> r.checked = (r.value===state.tunerMode));
 }
@@ -470,7 +519,7 @@ refBtn.addEventListener("click",()=>{
   if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
   if(refOsc){ stopRefTone(); return; }
   const o=audioCtx.createOscillator(), g=audioCtx.createGain();
-  const f=stringFreq(state.activeString);
+  const f=targetFreq() || stringFreq(state.activeString);
   // Lautstärke-Ausgleich: Tieftöne bekommen mehr Gain (gleiche wahrgenommene Lautstärke)
   const vol=Math.min(0.5, 0.25*Math.pow(150/f,0.4));
   const t=audioCtx.currentTime;
@@ -482,7 +531,27 @@ refBtn.addEventListener("click",()=>{
   refOsc=o; refGain=g;
   setTimeout(()=>{ if(refOsc===o) stopRefTone(); },2000);
 });
+/* --- Auswahl: Automatisch / Eigener Ton --- */
+const autoBtn=document.getElementById("autoBtn");
+const customApply=document.getElementById("customApply");
 
+autoBtn.addEventListener("click",()=>{
+  state.target="auto"; save();
+  document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
+  updateTunerUI();
+  setNeedleRedraw();
+});
+
+customApply.addEventListener("click",()=>{
+  const hz=parseFloat(document.getElementById("customHz").value);
+  const label=document.getElementById("customName").value.trim()||"Eigener Ton";
+  if(isNaN(hz)||hz<60||hz>500){ alert("Bitte eine Frequenz zwischen 60 und 500 Hz angeben."); return; }
+  state.customNote={hz,label};
+  state.target="custom"; save();
+  document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
+  updateTunerUI();
+  setNeedleRedraw();
+});
 /* --- Anzeige: Notenskala im Frei-Modus --- */
 function clearDisplayMarkers(){
   tunerDisplay.querySelectorAll(".noteMarker,.hzLabel").forEach(el=>el.remove());
@@ -496,21 +565,20 @@ function clearDisplayMarkers(){
 }
 // Dezentes Raster: vertikale Linien bei jeder Saiten-Note (beide Modi nutzbar)
 function renderGrid(){
+  clearDisplayMarkers();                     // IMMER zuerst aufräumen
   if(state.tunerMode!=="free") return;
   STD_STRINGS.forEach(s=>{
     const f=s.hz*state.a4/440;
-    if(state.tunerMode==="free"){
-      const p=(freePos(f)*100)+"%";
-      const gl=document.createElement("div");
-      gl.className="gridLine"; gl.style.left=p;
-      tunerDisplay.appendChild(gl);
-      const nm=document.createElement("div");
-      nm.className="noteMarker"; nm.textContent=s.note; nm.style.left=p;
-      tunerDisplay.appendChild(nm);
-      const hl=document.createElement("div");
-      hl.className="hzLabel"; hl.textContent=f.toFixed(0); hl.style.left=p;
-      tunerDisplay.appendChild(hl);
-    }
+    const p=(freePos(f)*100)+"%";
+    const gl=document.createElement("div");
+    gl.className="gridLine"; gl.style.left=p;
+    tunerDisplay.appendChild(gl);
+    const nm=document.createElement("div");
+    nm.className="noteMarker"; nm.textContent=s.note; nm.style.left=p;
+    tunerDisplay.appendChild(nm);
+    const hl=document.createElement("div");
+    hl.className="hzLabel"; hl.textContent=f.toFixed(0); hl.style.left=p;
+    tunerDisplay.appendChild(hl);
   });
 }
 // Live-Frequenz-Label innerhalb der Grafik
@@ -553,13 +621,15 @@ function setNeedle(hz, targetHz, mode){
 function updateTunerUI(){
   setActiveModeRadio();
   if(state.tunerMode==="strings"){
-    const i=state.activeString, f=stringFreq(i);
-    const info=noteFromHz(f);
-    const r=noteRange(info.midi);
-    detectedNoteEl.textContent=STD_STRINGS[i].note;
-    targetHzEl.textContent=`Ziel: ${f.toFixed(2)} Hz`;
+    const tf=targetFreq();
+    const r=noteRange(noteFromHz(tf).midi);
+    let lbl = "Auto";
+    if(state.target==="custom") lbl=state.customNote.label;
+    else if(state.target.startsWith("string")) lbl=STD_STRINGS[+state.target.slice(6)].note;
+    detectedNoteEl.textContent=lbl;
+    targetHzEl.textContent=tf?`Ziel: ${tf.toFixed(2)} Hz`:"Erkenne Ton – nächstgelegene Saite wird gewählt";
     centOffEl.textContent="Nadel zeigt Abweichung ±100 Cent";
-    rangeInfoEl.textContent=`Frequenzbereich dieser Note: ${r.lo.toFixed(1)} – ${r.hi.toFixed(1)} Hz`;
+    rangeInfoEl.textContent=tf?`Frequenzbereich dieser Note: ${r.lo.toFixed(1)} – ${r.hi.toFixed(1)} Hz`:"Bereich: 70 – 450 Hz";
   }else{
     detectedNoteEl.textContent="Freier Modus";
     targetHzEl.textContent="Erkenne Ton …";
@@ -628,11 +698,21 @@ function loopPitch(){
   if(hz>0){
     renderLiveFreq(hz);
     const info=noteFromHz(hz);
+    lastHz=hz;
     const r=noteRange(info.midi);
     detectedNoteEl.textContent=`${info.name} · ${hz.toFixed(1)} Hz`;
     if(state.tunerMode==="strings"){
-      setNeedle(hz,stringFreq(state.activeString),"strings");
-      targetHzEl.textContent=`Ziel: ${STD_STRINGS[state.activeString].note} · ${stringFreq(state.activeString).toFixed(2)} Hz`;
+      if(targetFreq()){
+        const tf=targetFreq();
+        setNeedle(hz,tf,"strings");
+        let lbl = state.target==="custom" ? state.customNote.label : STD_STRINGS[+state.target.slice(6)].note;
+        targetHzEl.textContent=`Ziel: ${lbl} · ${tf.toFixed(2)} Hz`;
+      }else{
+        let best=0,bd=Infinity;
+        STD_STRINGS.forEach((s,i)=>{ const dd=Math.abs(1200*Math.log2(hz/(s.hz*state.a4/440))); if(dd<bd){bd=dd;best=i;} });
+        setNeedle(hz,stringFreq(best),"strings");
+        targetHzEl.textContent=`Auto: ${STD_STRINGS[best].note} · ${stringFreq(best).toFixed(2)} Hz`;
+      }
     }else{
       setNeedle(hz,null,"free");
       let best=STD_STRINGS[0],bd=Infinity;
