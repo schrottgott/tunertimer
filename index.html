@@ -126,7 +126,7 @@
   .hzLabel{position:absolute;bottom:6px;font-size:11px;color:var(--muted);transform:translateX(-50%);pointer-events:none;}
   .gridLine{position:absolute;top:0;bottom:22px;width:1px;background:var(--line);opacity:.55;transform:translateX(-50%);pointer-events:none;}
   .liveFreq{
-    position:absolute;top:8px;transform:translateX(-50%);
+    position:absolute;top:38%;transform:translateX(-50%);
     background:var(--red);color:#fff;border-radius:8px;
     padding:2px 8px;font-size:13px;font-weight:600;pointer-events:none;white-space:nowrap;
   } 
@@ -496,6 +496,7 @@ function clearDisplayMarkers(){
 }
 // Dezentes Raster: vertikale Linien bei jeder Saiten-Note (beide Modi nutzbar)
 function renderGrid(){
+  if(state.tunerMode!=="free") return;
   STD_STRINGS.forEach(s=>{
     const f=s.hz*state.a4/440;
     if(state.tunerMode==="free"){
@@ -527,18 +528,24 @@ function renderLiveFreq(hz){
 // Nadel steuern
 function setNeedle(hz, targetHz, mode){
   if(mode==="strings"){
+    needle.style.transformOrigin="bottom center";
+    needle.style.transition="transform .06s linear";
+    needle.style.left="50%";
+    needle.style.width="3px";
+    needle.style.height="60%";
+    needle.style.bottom="0";
     const cents=1200*Math.log2(hz/targetHz);
     const clamped=Math.max(-100,Math.min(100,cents));
     const pct=(clamped+100)/200;
-    needle.style.left="50%";
     needle.style.transform=`rotate(${(pct-0.5)*90}deg)`;
-    needle.style.width="3px"; needle.style.height="60%";
     centOffEl.textContent=`${cents>=0?"+":""}${cents.toFixed(1)} Cent (${cents>5?"zu hoch":cents<-5?"zu tief":"gut ✓"})`;
     needle.style.background = Math.abs(cents)<=5 ? getComputedStyle(document.documentElement).getPropertyValue("--green") : "";
   }else{
-    needle.style.left=(freePos(hz)*100)+"%";
+    needle.style.transformOrigin="initial";
+    needle.style.transition="left .06s linear, transform .06s linear";
     needle.style.transform="none";
-    needle.style.width="3px"; needle.style.height="80%";
+    needle.style.left=(freePos(hz)*100)+"%";
+    needle.style.width="3px"; needle.style.height="80%"; needle.style.bottom="0";
     needle.style.background="";
   }
 }
