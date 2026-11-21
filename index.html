@@ -551,16 +551,48 @@ autoBtn.addEventListener("click",()=>{
   setNeedleRedraw();
 });
 
+/* Notenname → Frequenz: erlaubt z. B. "C1", "c2", "F#3", "Eb4" */
+function noteNameToHz(str){
+  const m=str.trim().match(/^([A-Ha-h])([#b]?)(-?\d{1,2})$/);
+  if(!m) return null;
+  let base=m[1].toUpperCase();
+  let semis={C:0,D:2,E:4,F:5,G:7,A:9,H:10,B:11}[base];
+  if(base==="B" && !m[2]) semis=11;        // englisches B = deutsches H
+  if(base==="H") semis=10;
+  if(m[2]==="#") semis+=1;
+  if(m[2]==="b") semis-=1;
+  const oct=parseInt(m[3],10);
+  const midi=(oct+1)*12+semis;             // MIDI-Nummer (C1 = 24)
+  const hz=state.a4*Math.pow(2,(midi-69)/12);
+  if(hz<60||hz>500) return null;
+  return {hz, midi};
+}
+
 customApply.addEventListener("click",()=>{
-  const hz=parseFloat(document.getElementById("customHz").value);
-  const label=document.getElementById("customName").value.trim()||"Eigener Ton";
-  if(isNaN(hz)||hz<60||hz>500){ alert("Bitte eine Frequenz zwischen 60 und 500 Hz angeben."); return; }
-  state.customNote={hz,label};
+  const nameIn=document.getElementById("customName");
+  const hzIn=document.getElementById("customHz");
+  const label=nameIn.value.trim();
+  const parsed=label?noteNameToHz(label):null;
+  let hz=parseFloat(hzIn.value);
+  // Wenn der Name eine echte Note ist, hat sie Vorrang – außer der Nutzer
+  // hat manuell einen abweichenden Hz-Wert eingegeben (dann bewusst andere Frequenz).
+  if(parsed && (isNaN(hz) || Math.abs(hz-parsed.hz)<0.01)){
+    hz=parsed.hz;
+    hzIn.value=hz.toFixed(2);              // Vorschlag sichtbar ins Feld schreiben
+  }
+  if(isNaN(hz)||hz<60||hz>500){ alert("Bitte einen gültigen Notennamen (z. B. C1, F#3) oder eine Frequenz zwischen 60 und 500 Hz angeben."); return; }
+  state.customNote={hz, label: label||"Eigener Ton"};
   state.target="custom"; save();
   document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
   updateTunerUI();
   setNeedleRedraw();
 });
+
+  document.getElementById("customName").addEventListener("change",()=>{
+  const parsed=noteNameToHz(document.getElementById("customName").value);
+  if(parsed) document.getElementById("customHz").value=parsed.hz.toFixed(2);
+});
+  
 /* --- Anzeige: Notenskala im Frei-Modus --- */
 function clearDisplayMarkers(){
   tunerDisplay.querySelectorAll(".noteMarker,.hzLabel").forEach(el=>el.remove());
