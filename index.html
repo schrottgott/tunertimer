@@ -142,6 +142,7 @@
     transition:background .2s ease,color .2s ease;
   }
   .stringBtn.active{background:var(--red);color:#fff;border-color:var(--red);}
+  .btn.targetActive{background:var(--red);color:#fff;border-color:var(--red);}
   .stringBtn small{display:block;font-weight:400;font-size:11px;color:inherit;opacity:.75;}
 
   /* ===== Metronom ===== */
@@ -429,12 +430,13 @@ function targetFreq(){
 }
 
 function customNoteLabel(){
-  // für eigene Töne: reale Note + Cent-Abweichung aus der Frequenz ableiten
   if(state.target!=="custom" || !state.customNote.hz) return "";
   const info=noteFromHz(state.customNote.hz);
+  // Wenn der Name selbst diese Note bezeichnet, ist kein Zusatz nötig
+  if((state.customNote.label||"").toLowerCase()===info.name.toLowerCase()) return "";
   const cents=Math.round(info.cents);
-  if(Math.abs(cents)<10) return `${info.name} (exakt)`;
-  return `≈ ${info.name} (${cents>=0?"+":""}${cents} ¢)`;
+  if(Math.abs(cents)<10) return ` (= ${info.name})`;
+  return ` (= ${info.name}, ${cents>=0?"+":""}${cents} ¢)`;
 }
   
 // Notenname + exakte Frequenz + Cent-Abweichung aus Frequenz
@@ -469,6 +471,7 @@ STD_STRINGS.forEach((s,i)=>{
     refreshStringButtons();
     save(); updateTunerUI();
     setNeedleRedraw();
+    updateTargetButtons();     
   });
   stringListEl.appendChild(b);
 });
@@ -544,11 +547,17 @@ refBtn.addEventListener("click",()=>{
 const autoBtn=document.getElementById("autoBtn");
 const customApply=document.getElementById("customApply");
 
+function updateTargetButtons(){
+  autoBtn.classList.toggle("targetActive", state.target==="auto");
+  customApply.classList.toggle("targetActive", state.target==="custom");
+}
+
 autoBtn.addEventListener("click",()=>{
   state.target="auto"; save();
   document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
   updateTunerUI();
   setNeedleRedraw();
+  updateTargetButtons();     
 });
 
 /* Notenname → Frequenz: erlaubt z. B. "C1", "c2", "F#3", "Eb4" */
@@ -586,6 +595,7 @@ customApply.addEventListener("click",()=>{
   document.querySelectorAll(".stringBtn").forEach(x=>x.classList.remove("active"));
   updateTunerUI();
   setNeedleRedraw();
+  updateTargetButtons();     
 });
 
   document.getElementById("customName").addEventListener("change",()=>{
@@ -665,7 +675,7 @@ function updateTunerUI(){
     const tf=targetFreq();
     const r=noteRange(noteFromHz(tf).midi);
     let lbl = "Auto";
-    if(state.target==="custom") lbl=state.customNote.label+" · "+customNoteLabel();
+    if(state.target==="custom") lbl=state.customNote.label+customNoteLabel();
     else if(state.target.startsWith("string")) lbl=STD_STRINGS[+state.target.slice(6)].note;
     detectedNoteEl.textContent=lbl;
     targetHzEl.textContent=tf?`Ziel: ${tf.toFixed(2)} Hz`:"Erkenne Ton – nächstgelegene Saite wird gewählt";
@@ -749,7 +759,7 @@ function loopPitch(){
       if(targetFreq()){
         const tf=targetFreq();
         setNeedle(hz,tf,"strings");
-        let lbl = state.target==="custom" ? state.customNote.label+" · "+customNoteLabel() : STD_STRINGS[+state.target.slice(6)].note;
+        let lbl = state.target==="custom" ? state.customNote.label+customNoteLabel() : STD_STRINGS[+state.target.slice(6)].note;
         targetHzEl.textContent=`Ziel: ${lbl} · ${tf.toFixed(2)} Hz`;
       }else{
         let best=0,bd=Infinity;
