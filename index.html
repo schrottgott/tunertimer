@@ -427,6 +427,15 @@ function targetFreq(){
   if(typeof state.target==="string" && state.target.startsWith("string")) return stringFreq(+state.target.slice(6));
   return null;
 }
+
+function customNoteLabel(){
+  // für eigene Töne: reale Note + Cent-Abweichung aus der Frequenz ableiten
+  if(state.target!=="custom" || !state.customNote.hz) return "";
+  const info=noteFromHz(state.customNote.hz);
+  const cents=Math.round(info.cents);
+  if(Math.abs(cents)<10) return `${info.name} (exakt)`;
+  return `≈ ${info.name} (${cents>=0?"+":""}${cents} ¢)`;
+}
   
 // Notenname + exakte Frequenz + Cent-Abweichung aus Frequenz
 function noteFromHz(hz){
@@ -624,7 +633,7 @@ function updateTunerUI(){
     const tf=targetFreq();
     const r=noteRange(noteFromHz(tf).midi);
     let lbl = "Auto";
-    if(state.target==="custom") lbl=state.customNote.label;
+    if(state.target==="custom") lbl=state.customNote.label+" · "+customNoteLabel();
     else if(state.target.startsWith("string")) lbl=STD_STRINGS[+state.target.slice(6)].note;
     detectedNoteEl.textContent=lbl;
     targetHzEl.textContent=tf?`Ziel: ${tf.toFixed(2)} Hz`:"Erkenne Ton – nächstgelegene Saite wird gewählt";
@@ -646,7 +655,7 @@ function detectPitch(buf, sampleRate){
   let rms=0;
   for(let i=0;i<SIZE;i++){ rms+=buf[i]*buf[i]; }
   rms=Math.sqrt(rms/SIZE);
-  if(rms<0.01) return -1;
+  if(rms<0.003) return -1;
   let r1=0,r2=SIZE-1,thr=0.2;
   for(let i=0;i<SIZE/2;i++) if(Math.abs(buf[i])<thr){ r1=i; break; }
   for(let i=1;i<SIZE/2;i++) if(Math.abs(buf[SIZE-i])<thr){ r2=SIZE-i; break; }
@@ -678,9 +687,12 @@ document.getElementById("micBtn").addEventListener("click", async function(){
     if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     await audioCtx.resume();
     const src=audioCtx.createMediaStreamSource(micStream);
+    const boost=audioCtx.createGain();
+    boost.gain.value=2.0;                              // Eingangsverstärkung, bei Bedarf 1.5–3.0
+    src.connect(boost);
     analyser=audioCtx.createAnalyser();
     analyser.fftSize=PITCH_BUF;
-    src.connect(analyser);
+    boost.connect(analyser);
     pitchRunning=true;
     this.textContent="⏹ Mikrofon stoppen";
     micWarn.style.display="none";
@@ -705,7 +717,7 @@ function loopPitch(){
       if(targetFreq()){
         const tf=targetFreq();
         setNeedle(hz,tf,"strings");
-        let lbl = state.target==="custom" ? state.customNote.label : STD_STRINGS[+state.target.slice(6)].note;
+        let lbl = state.target==="custom" ? state.customNote.label+" · "+customNoteLabel() : STD_STRINGS[+state.target.slice(6)].note;
         targetHzEl.textContent=`Ziel: ${lbl} · ${tf.toFixed(2)} Hz`;
       }else{
         let best=0,bd=Infinity;
